@@ -126,9 +126,9 @@ class Alert(BaseModel):
 
 class AppConfig(BaseModel):
     video_source: str = "0"  # "0" for webcam, or path to video file
-    recovery_window: float = 10.0  # seconds
+    recovery_window: float = 5.0  # seconds
     location_label: str = "Living Room"
-    fall_confidence_threshold: float = 0.55
+    fall_confidence_threshold: float = 0.45
     show_pose_overlay: bool = True
     frame_skip: int = 0  # process every Nth frame (0 = every frame)
 

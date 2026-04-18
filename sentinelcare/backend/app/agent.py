@@ -50,9 +50,9 @@ class FallGuardAgent:
     W_DELTA_ANGLE = 0.15
 
     # --- Consecutive-frame requirements ---
-    FRAMES_TO_SUSPICIOUS = 3
+    FRAMES_TO_SUSPICIOUS = 2
     FRAMES_TO_NORMAL = 5
-    FRAMES_TO_MONITORING = 5
+    FRAMES_TO_MONITORING = 3
     FRAMES_GAP_HOLD = 10
 
     def __init__(

@@ -284,8 +284,8 @@ def main():
                         help="Video file or folder (default: datasets/sample)")
     parser.add_argument("--out", default=None,
                         help="Output directory (default: <input_dir>/results_video)")
-    parser.add_argument("--recovery-window", type=float, default=10.0)
-    parser.add_argument("--threshold", type=float, default=0.55)
+    parser.add_argument("--recovery-window", type=float, default=5.0)
+    parser.add_argument("--threshold", type=float, default=0.45)
     parser.add_argument("--window-size", type=int, default=20)
     parser.add_argument("--stillness", type=float, default=0.005)
     parser.add_argument("--ema", type=float, default=0.3)
