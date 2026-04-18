@@ -128,7 +128,11 @@ curl -X POST http://localhost:8000/config \
   -d '{"video_source": "/path/to/video.mp4"}'
 ```
 
----
+### Useful dataset(Kosuke)
+https://www.kaggle.com/datasets/simuletic/cctv-incident-dataset-fall-and-lying-down-detection
+https://fenix.ur.edu.pl/mkepski/ds/uf.html human fall dataset
+https://www.kaggle.com/datasets/uttejkumarkandagatla/fall-detection-dat human fall dataset
+https://www.kaggle.com/datasets/ivannikolov/thermal-mannequin-fall-image-dataset  mp4 thermal 
 
 ## 📡 API Endpoints
 

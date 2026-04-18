@@ -25,3 +25,11 @@ Thumbs.db
 
 # MediaPipe model (30MB — download separately)
 *.task
+
+# Dataset videos (download separately)
+backend/datasets/*.mp4
+backend/datasets/*.avi
+backend/datasets/*.mov
+backend/datasets/*.mkv
+backend/datasets/**/*.mp4
+backend/datasets/**/*.avi
