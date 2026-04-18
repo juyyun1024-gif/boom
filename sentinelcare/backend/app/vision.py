@@ -66,8 +66,12 @@ class PoseTracker:
         min_tracking_confidence: float = 0.5,
     ) -> None:
         if model_path is None:
-            # Look for model relative to this file or in backend root
+            # Look for model in multiple locations
+            # (paths with Japanese chars / spaces can fail in MediaPipe,
+            #  so we also check TEMP and C:\sentinelcare_model)
+            temp_dir = os.environ.get("TEMP", "")
             candidates = [
+                os.path.join(temp_dir, "pose_landmarker.task"),
                 os.path.join(os.path.dirname(__file__), "..", "pose_landmarker.task"),
                 os.path.join(os.path.dirname(__file__), "pose_landmarker.task"),
                 "pose_landmarker.task",
