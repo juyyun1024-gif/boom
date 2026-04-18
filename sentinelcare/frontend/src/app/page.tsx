@@ -14,6 +14,8 @@ import FutureAgents from "@/components/FutureAgents";
 import ConsentModal from "@/components/ConsentModal";
 import PrivacyStatus from "@/components/PrivacyStatus";
 import SecurityStatus from "@/components/SecurityStatus";
+import AlertSettings from "@/components/AlertSettings";
+import EmergencyAlertModal from "@/components/EmergencyAlertModal";
 import { useUserSettings } from "@/hooks/useUserSettings";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
@@ -27,6 +29,12 @@ export default function Dashboard() {
   const [enabledAgents, setEnabledAgents] = useState<Set<string>>(
     new Set(["FallGuard", "Seizure", "Stroke"])
   );
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [emergencyAlertInfo, setEmergencyAlertInfo] = useState<{
+    type: string;
+    severity: string;
+    timestamp: Date;
+  } | null>(null);
 
   const {
     connected,
@@ -79,6 +87,23 @@ export default function Dashboard() {
 
     checkAuth();
   }, [router]);
+
+  // Monitor for critical alerts
+  useEffect(() => {
+    if (agentState?.state === "CRITICAL_ALERT" && !showEmergencyModal) {
+      setEmergencyAlertInfo({
+        type: agentState.alert_reason || "Critical Medical Event",
+        severity: "critical",
+        timestamp: new Date(),
+      });
+      setShowEmergencyModal(true);
+    }
+  }, [agentState?.state, showEmergencyModal]);
+
+  const handleCloseEmergencyModal = () => {
+    setShowEmergencyModal(false);
+    setEmergencyAlertInfo(null);
+  };
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -151,6 +176,18 @@ export default function Dashboard() {
       {/* Consent Modal */}
       {showConsent && user && consentChecked && (
         <ConsentModal userId={user.id} onConsentGiven={handleConsentGiven} />
+      )}
+
+      {/* Emergency Alert Modal */}
+      {emergencyAlertInfo && (
+        <EmergencyAlertModal
+          isOpen={showEmergencyModal}
+          alertType={emergencyAlertInfo.type}
+          alertSeverity={emergencyAlertInfo.severity}
+          alertTimestamp={emergencyAlertInfo.timestamp}
+          onClose={handleCloseEmergencyModal}
+          onDispatched={handleAcknowledge}
+        />
       )}
 
       <main className="flex-1 flex flex-col p-4 gap-4 max-w-[1920px] mx-auto w-full">
@@ -291,6 +328,11 @@ export default function Dashboard() {
       {/* Security Status - Below Event Timeline */}
       <div className="shrink-0">
         <SecurityStatus connected={connected} />
+      </div>
+
+      {/* Alert Settings - Emergency Contacts & Notification Preferences */}
+      <div className="shrink-0">
+        <AlertSettings />
       </div>
       </main>
     </>

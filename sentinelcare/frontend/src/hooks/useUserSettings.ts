@@ -10,6 +10,9 @@ export interface UserSettings {
   monitoring_paused: boolean;
   privacy_mode: boolean;
   alert_notifications: boolean;
+  notify_911: boolean;
+  notify_emergency_contacts: boolean;
+  notify_nearest_hospital: boolean;
 }
 
 const defaultSettings: Omit<UserSettings, 'user_id'> = {
@@ -17,6 +20,9 @@ const defaultSettings: Omit<UserSettings, 'user_id'> = {
   monitoring_paused: false,
   privacy_mode: false,
   alert_notifications: true,
+  notify_911: true,
+  notify_emergency_contacts: true,
+  notify_nearest_hospital: true,
 };
 
 export function useUserSettings() {
@@ -130,6 +136,27 @@ export function useUserSettings() {
     }
   }, [settings, updateSetting]);
 
+  // Toggle 911 notifications
+  const toggleNotify911 = useCallback(() => {
+    if (settings) {
+      updateSetting('notify_911', !settings.notify_911);
+    }
+  }, [settings, updateSetting]);
+
+  // Toggle emergency contacts notifications
+  const toggleNotifyEmergencyContacts = useCallback(() => {
+    if (settings) {
+      updateSetting('notify_emergency_contacts', !settings.notify_emergency_contacts);
+    }
+  }, [settings, updateSetting]);
+
+  // Toggle nearest hospital notifications
+  const toggleNotifyNearestHospital = useCallback(() => {
+    if (settings) {
+      updateSetting('notify_nearest_hospital', !settings.notify_nearest_hospital);
+    }
+  }, [settings, updateSetting]);
+
   return {
     settings,
     loading,
@@ -139,5 +166,8 @@ export function useUserSettings() {
     togglePrivacyMode,
     toggleMonitoringPaused,
     toggleAlertNotifications,
+    toggleNotify911,
+    toggleNotifyEmergencyContacts,
+    toggleNotifyNearestHospital,
   };
 }
