@@ -11,8 +11,10 @@ from typing import Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel as PydanticBaseModel
 
 from .agent import FallGuardAgent
+from .email_sender import send_alert_email
 from .event_store import event_store
 from .features import FeatureExtractor
 from .models import AppConfig, WSMessage, AgentStateName, PoseFeatures
@@ -32,6 +34,11 @@ logger = logging.getLogger("sentinelcare")
 config = AppConfig()
 connected_clients: Set[WebSocket] = set()
 _running = False
+
+# Emergency contact & location info (set by frontend via /alerts/config)
+_alert_contacts: list[dict] = []       # [{"name": ..., "email": ...}, ...]
+_alert_location: dict = {}             # {"address": ..., "latitude": ..., "longitude": ...}
+_alert_nearest_hospital: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +195,52 @@ async def reset_agent():
 
 
 # ---------------------------------------------------------------------------
+# Alert email configuration & dispatch
+# ---------------------------------------------------------------------------
+
+class AlertContactsPayload(PydanticBaseModel):
+    contacts: list[dict] = []          # [{"name": "...", "email": "...", "phone": "..."}]
+    location: dict = {}                # {"address": "...", "latitude": ..., "longitude": ...}
+    nearest_hospital: dict | None = None  # {"name": "...", "address": "...", "phone": "...", "distance": ...}
+
+
+@app.post("/alerts/config")
+async def set_alert_config(payload: AlertContactsPayload):
+    """Store emergency contacts and location so the backend can send emails on alert."""
+    global _alert_contacts, _alert_location, _alert_nearest_hospital
+    _alert_contacts = payload.contacts
+    _alert_location = payload.location
+    _alert_nearest_hospital = payload.nearest_hospital
+    logger.info(
+        f"Alert config updated: {len(_alert_contacts)} contacts, "
+        f"location={'set' if _alert_location.get('address') else 'unset'}, "
+        f"hospital={'set' if _alert_nearest_hospital else 'unset'}"
+    )
+    return {"status": "updated", "contacts": len(_alert_contacts)}
+
+
+def _send_alert_email_for_event(event) -> bool:
+    """Send alert email using stored contacts/location. Called from vision loop."""
+    emails = [c["email"] for c in _alert_contacts if c.get("email")]
+    if not emails:
+        logger.info("No emergency contact emails configured — skipping auto-email.")
+        return False
+
+    return send_alert_email(
+        to_emails=emails,
+        alert_type=event.event_type.replace("_", " ").title(),
+        severity="critical",
+        timestamp=event.timestamp,
+        location=_alert_location.get("address", ""),
+        latitude=_alert_location.get("latitude"),
+        longitude=_alert_location.get("longitude"),
+        nearest_hospital=_alert_nearest_hospital,
+        summary=event.summary,
+        recommended_action=event.recommended_action,
+    )
+
+
+# ---------------------------------------------------------------------------
 # WebSocket
 # ---------------------------------------------------------------------------
 
@@ -269,6 +322,7 @@ async def _vision_loop(ws: WebSocket) -> None:
     _running = True
     frame_count = 0
     last_event_count = len(event_store.get_events(limit=999))
+    _email_sent_for_alert: str | None = None  # track alert_id to avoid duplicate emails
     target_interval = 1.0 / 24  # ~24 FPS target for streaming
 
     logger.info(f"Vision loop started — source: {config.video_source}")
@@ -369,6 +423,17 @@ async def _vision_loop(ws: WebSocket) -> None:
                 if latest:
                     msg.alert = latest
                     msg.type = "critical_alert"
+
+                    # Auto-send email (once per alert)
+                    if latest.alert_id != _email_sent_for_alert:
+                        _email_sent_for_alert = latest.alert_id
+                        try:
+                            _send_alert_email_for_event(latest.event)
+                        except Exception as email_err:
+                            logger.error(f"Auto-email failed: {email_err}")
+            else:
+                # Reset email flag when no longer in critical state
+                _email_sent_for_alert = None
 
             await _broadcast(msg.model_dump())
 

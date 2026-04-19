@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useUserSettings } from '@/hooks/useUserSettings';
 import { useEmergencyContacts } from '@/hooks/useEmergencyContacts';
 import { useUserLocation } from '@/hooks/useUserLocation';
-import { useAlertDispatch } from '@/hooks/useAlertDispatch';
+import { useAlertDispatch, Hospital } from '@/hooks/useAlertDispatch';
 
 interface EmergencyAlertModalProps {
   isOpen: boolean;
@@ -34,15 +34,18 @@ export default function EmergencyAlertModal({
   const [isCancelled, setIsCancelled] = useState(false);
   const [isDispatched, setIsDispatched] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<any>(null);
-  const [nearestHospital, setNearestHospital] = useState<any>(null);
+  const [nearestHospital, setNearestHospital] = useState<Hospital | null>(null);
+  const [loadingHospital, setLoadingHospital] = useState(false);
 
-  // Fetch nearest hospital on open
+  // Fetch nearest hospital on open when the option is checked
   useEffect(() => {
-    if (isOpen && location?.latitude && location?.longitude) {
+    if (isOpen && location?.latitude && location?.longitude && settings?.notify_nearest_hospital) {
+      setLoadingHospital(true);
       fetchNearestHospital(Number(location.latitude), Number(location.longitude))
-        .then(setNearestHospital);
+        .then(setNearestHospital)
+        .finally(() => setLoadingHospital(false));
     }
-  }, [isOpen, location, fetchNearestHospital]);
+  }, [isOpen, location, settings?.notify_nearest_hospital, fetchNearestHospital]);
 
   // Countdown timer
   useEffect(() => {
@@ -58,6 +61,7 @@ export default function EmergencyAlertModal({
     }, 1000);
 
     return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, countdown, isCancelled, isDispatched]);
 
   // Reset state when modal opens
@@ -67,6 +71,7 @@ export default function EmergencyAlertModal({
       setIsCancelled(false);
       setIsDispatched(false);
       setDispatchResult(null);
+      setNearestHospital(null);
     }
   }, [isOpen]);
 
@@ -112,15 +117,17 @@ export default function EmergencyAlertModal({
 
   if (!isOpen) return null;
 
+  const emailContacts = contacts.filter(c => c.email && c.email.trim() !== '');
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
 
       {/* Modal */}
-      <div className="relative w-full max-w-lg mx-4 bg-slate-900 border border-red-500/50 rounded-2xl shadow-2xl shadow-red-500/20 overflow-hidden">
+      <div className="relative w-full max-w-lg mx-4 bg-slate-900 border border-red-500/50 rounded-2xl shadow-2xl shadow-red-500/20 overflow-hidden max-h-[90vh] overflow-y-auto">
         {/* Pulsing border effect */}
-        <div className="absolute inset-0 rounded-2xl border-2 border-red-500 animate-pulse opacity-50" />
+        <div className="absolute inset-0 rounded-2xl border-2 border-red-500 animate-pulse opacity-50 pointer-events-none" />
 
         {/* Header */}
         <div className="relative bg-red-500/20 p-6 border-b border-red-500/30">
@@ -143,7 +150,7 @@ export default function EmergencyAlertModal({
             <>
               {/* Countdown */}
               <div className="text-center">
-                <p className="text-slate-400 mb-2">Emergency services will be notified in</p>
+                <p className="text-slate-400 mb-2">Alert will be dispatched in</p>
                 <div className="text-6xl font-bold text-red-400 tabular-nums">
                   {countdown}
                 </div>
@@ -153,12 +160,16 @@ export default function EmergencyAlertModal({
               {/* Alert Info */}
               <div className="space-y-2 p-4 rounded-lg bg-slate-800/50 border border-slate-700">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Issue:</span>
+                  <span className="text-slate-500">Event:</span>
                   <span className="text-slate-200 font-medium">{alertType}</span>
                 </div>
                 <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Severity:</span>
+                  <span className="text-red-400 font-medium uppercase">{alertSeverity}</span>
+                </div>
+                <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Time:</span>
-                  <span className="text-slate-200">{alertTimestamp.toLocaleTimeString()}</span>
+                  <span className="text-slate-200">{alertTimestamp.toLocaleString()}</span>
                 </div>
                 {location?.home_address && (
                   <div className="flex justify-between text-sm">
@@ -167,6 +178,32 @@ export default function EmergencyAlertModal({
                   </div>
                 )}
               </div>
+
+              {/* Nearest Hospital */}
+              {settings?.notify_nearest_hospital && (
+                <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="w-4 h-4 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                    <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wide">Nearest Hospital</span>
+                  </div>
+                  {loadingHospital ? (
+                    <p className="text-xs text-slate-500">Searching for nearest hospital…</p>
+                  ) : nearestHospital ? (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-slate-200">{nearestHospital.name}</p>
+                      <p className="text-xs text-slate-400">{nearestHospital.address}</p>
+                      <div className="flex items-center gap-3 text-xs text-slate-500">
+                        <span>{nearestHospital.distance} mi away</span>
+                        {nearestHospital.phone && <span>📞 {nearestHospital.phone}</span>}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">Set your home location in Alert Settings to find nearby hospitals.</p>
+                  )}
+                </div>
+              )}
 
               {/* Who will be notified */}
               <div className="space-y-2">
@@ -177,14 +214,14 @@ export default function EmergencyAlertModal({
                       911 Emergency
                     </span>
                   )}
-                  {settings?.notify_emergency_contacts && contacts.length > 0 && (
+                  {settings?.notify_emergency_contacts && emailContacts.length > 0 && (
                     <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 text-xs font-medium">
-                      {contacts.length} Contact{contacts.length > 1 ? 's' : ''}
+                      ✉️ {emailContacts.length} Contact{emailContacts.length > 1 ? 's' : ''} via email
                     </span>
                   )}
                   {settings?.notify_nearest_hospital && nearestHospital && (
                     <span className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-medium">
-                      {nearestHospital.name}
+                      🏥 {nearestHospital.name} (in email)
                     </span>
                   )}
                 </div>
@@ -217,7 +254,11 @@ export default function EmergencyAlertModal({
                   </svg>
                 </div>
                 <h3 className="text-xl font-bold text-slate-200 mb-2">Alert Dispatched</h3>
-                <p className="text-slate-400">Emergency services have been notified.</p>
+                <p className="text-slate-400">
+                  {dispatchResult?.mailtoOpened
+                    ? 'Your email client has been opened with the alert details.'
+                    : 'Alert has been logged.'}
+                </p>
               </div>
 
               {/* Dispatch Summary */}
@@ -227,28 +268,52 @@ export default function EmergencyAlertModal({
                     <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span className="text-slate-300">911 Emergency Services notified</span>
+                    <span className="text-slate-300">911 Emergency Services flagged</span>
                   </div>
                 )}
-                {dispatchResult?.notifiedContacts?.length > 0 && (
+                {dispatchResult?.mailtoOpened && (
                   <div className="flex items-center gap-2 text-sm">
                     <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     <span className="text-slate-300">
-                      {dispatchResult.notifiedContacts.length} emergency contact{dispatchResult.notifiedContacts.length > 1 ? 's' : ''} notified
+                      Email opened for {emailContacts.length} contact{emailContacts.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                )}
+                {dispatchResult?.notifiedContacts?.length > 0 && !dispatchResult?.mailtoOpened && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01" />
+                    </svg>
+                    <span className="text-slate-300">
+                      No contacts have email addresses — add emails in Alert Settings
                     </span>
                   </div>
                 )}
                 {dispatchResult?.notifiedHospital && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="flex items-start gap-2 text-sm">
+                    <svg className="w-4 h-4 text-emerald-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span className="text-slate-300">{dispatchResult.notifiedHospital.name} alerted</span>
+                    <div>
+                      <span className="text-slate-300">Nearest hospital included in email</span>
+                      <p className="text-cyan-400 text-xs mt-0.5">
+                        {dispatchResult.notifiedHospital.name} — {dispatchResult.notifiedHospital.distance} mi
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
+
+              {/* Reminder to hit send */}
+              {dispatchResult?.mailtoOpened && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-xs text-amber-300">
+                    <strong>Reminder:</strong> Review the pre-filled email in your mail client and hit Send.
+                  </p>
+                </div>
+              )}
 
               {/* Close button */}
               <button

@@ -25,6 +25,7 @@ export default function AlertSettings() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [addressInput, setAddressInput] = useState('');
   const [savingLocation, setSavingLocation] = useState(false);
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
 
   const handleSaveAddress = async () => {
     if (!addressInput.trim()) return;
@@ -42,6 +43,7 @@ export default function AlertSettings() {
         country: 'USA',
       });
       setAddressInput('');
+      setIsEditingLocation(false);
     } catch (err) {
       console.error('Error saving address:', err);
     } finally {
@@ -61,6 +63,8 @@ export default function AlertSettings() {
         state: '',
         country: 'USA',
       });
+      setAddressInput('');
+      setIsEditingLocation(false);
     }
   };
 
@@ -190,7 +194,7 @@ export default function AlertSettings() {
           <div className="space-y-3">
             <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Home Location</h4>
             
-            {location?.home_address ? (
+            {location?.home_address && !isEditingLocation ? (
               <div className="p-3 rounded-lg bg-slate-800/30 border border-slate-700/50">
                 <div className="flex items-start justify-between">
                   <div className="flex items-start gap-3">
@@ -208,7 +212,10 @@ export default function AlertSettings() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setAddressInput(location.home_address)}
+                    onClick={() => {
+                      setAddressInput(location.home_address);
+                      setIsEditingLocation(true);
+                    }}
                     className="text-xs text-slate-400 hover:text-slate-200"
                   >
                     Edit
@@ -232,6 +239,17 @@ export default function AlertSettings() {
                   >
                     {savingLocation ? 'Saving...' : 'Save'}
                   </button>
+                  {isEditingLocation && (
+                    <button
+                      onClick={() => {
+                        setAddressInput('');
+                        setIsEditingLocation(false);
+                      }}
+                      className="px-3 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-600 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
                 <button
                   onClick={handleUseCurrentLocation}

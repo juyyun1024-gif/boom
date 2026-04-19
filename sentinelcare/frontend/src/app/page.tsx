@@ -17,6 +17,9 @@ import SecurityStatus from "@/components/SecurityStatus";
 import AlertSettings from "@/components/AlertSettings";
 import EmergencyAlertModal from "@/components/EmergencyAlertModal";
 import { useUserSettings } from "@/hooks/useUserSettings";
+import { useEmergencyContacts } from "@/hooks/useEmergencyContacts";
+import { useUserLocation } from "@/hooks/useUserLocation";
+import { useAlertDispatch } from "@/hooks/useAlertDispatch";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
 
@@ -55,6 +58,29 @@ export default function Dashboard() {
     toggleRecording,
     togglePrivacyMode,
   } = useUserSettings();
+
+  // Emergency contacts & location for auto-email alerts
+  const { contacts } = useEmergencyContacts();
+  const { location } = useUserLocation();
+  const { syncAlertConfig, fetchNearestHospital } = useAlertDispatch();
+
+  // Sync emergency contacts + location to backend for auto-email on critical alert
+  useEffect(() => {
+    if (!settings || !connected) return;
+
+    const sync = async () => {
+      let hospital = null;
+      if (settings.notify_nearest_hospital && location?.latitude && location?.longitude) {
+        hospital = await fetchNearestHospital(
+          Number(location.latitude),
+          Number(location.longitude)
+        );
+      }
+      await syncAlertConfig(contacts, location, hospital);
+    };
+
+    sync();
+  }, [contacts, location, settings, connected, syncAlertConfig, fetchNearestHospital]);
 
   // Check authentication and consent status
   useEffect(() => {
