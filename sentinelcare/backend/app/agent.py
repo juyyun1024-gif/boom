@@ -29,7 +29,9 @@ class FallGuardAgent(BaseAgent):
         recovery_window: float = 10.0, 
         confidence_threshold: float = 0.55,
         use_ml_boost: bool = False,
-        ml_weight: float = 0.3
+        ml_weight: float = 0.3,
+        use_trained_model: bool = False,
+        trained_model_path: Optional[str] = None
     ) -> None:
         super().__init__(recovery_window, confidence_threshold)
         
@@ -45,12 +47,27 @@ class FallGuardAgent(BaseAgent):
         # Cooldown after recovery
         self._recovery_cooldown_until: float = 0.0
         
+        # Sustained detection tracking
+        self._high_confidence_frames = 0  # Count frames with high fall confidence
+        self._required_sustained_frames = 2  # Reduced from 3 to 2 frames (~0.08s at 24fps)
+        
         # ML confidence booster (optional)
         self._use_ml_boost = use_ml_boost
         self._ml_booster: Optional['MLConfidenceBooster'] = None
         if use_ml_boost:
             from .ml_classifier import MLConfidenceBooster
             self._ml_booster = MLConfidenceBooster(ml_weight=ml_weight)
+        
+        # Trained model (alternative to rules)
+        self._use_trained_model = use_trained_model
+        self._trained_model: Optional['TrainedModelAgent'] = None
+        if use_trained_model and trained_model_path:
+            from .trained_model import TrainedModelAgent
+            self._trained_model = TrainedModelAgent(
+                model_path=trained_model_path,
+                threshold=confidence_threshold
+            )
+            print(f"[FallGuard] Using trained model from {trained_model_path}")
 
     # ------------------------------------------------------------------
     # Public API (BaseAgent implementation)
@@ -80,16 +97,28 @@ class FallGuardAgent(BaseAgent):
             if now < self._recovery_cooldown_until:
                 pass  # cooldown period after recovery
             elif fall_confidence >= self._confidence_threshold:
-                self._transition(AgentStateName.SUSPICIOUS_EVENT, fall_confidence, now)
-                self._event_start = now
-                self._frames_since_suspicious = 0
+                # Require sustained high confidence, not just a spike
+                self._high_confidence_frames += 1
+                print(f"[DEBUG] High confidence frame {self._high_confidence_frames}/{self._required_sustained_frames} (conf={fall_confidence:.3f})")
+                if self._high_confidence_frames >= self._required_sustained_frames:
+                    print(f"[ALERT] TRIGGERING SUSPICIOUS EVENT! Sustained {self._high_confidence_frames} frames")
+                    self._transition(AgentStateName.SUSPICIOUS_EVENT, fall_confidence, now)
+                    print(f"[STATE] Transitioned to SUSPICIOUS_EVENT with confidence {fall_confidence:.3f}")
+                    self._event_start = now
+                    self._frames_since_suspicious = 0
+            else:
+                # Reset counter if confidence drops
+                if self._high_confidence_frames > 0:
+                    print(f"[DEBUG] Confidence dropped to {fall_confidence:.3f}, resetting counter from {self._high_confidence_frames}")
+                self._high_confidence_frames = 0
 
         elif self._state == AgentStateName.SUSPICIOUS_EVENT:
             self._frames_since_suspicious += 1
             self._confidence = max(self._confidence, fall_confidence)
-            # Confirm after a few frames of sustained suspicious signal
-            if self._frames_since_suspicious >= 3 and self._confidence >= self._confidence_threshold:
+            # Confirm immediately - we already required 2 sustained frames to get here
+            if self._frames_since_suspicious >= 1 and self._confidence >= self._confidence_threshold:
                 self._transition(AgentStateName.MONITORING_RECOVERY, self._confidence, now)
+                print(f"[STATE] Transitioned to MONITORING_RECOVERY with confidence {self._confidence:.3f}")
                 self._timer_start = now
                 self._log_event("collapse_suspected", "monitoring_recovery",
                                 "Possible collapse detected. Monitoring for recovery.")
@@ -145,6 +174,7 @@ class FallGuardAgent(BaseAgent):
         self._last_change = time.time()
         self._baseline_centroid = None
         self._baseline_frames = 0
+        self._high_confidence_frames = 0
 
     # ------------------------------------------------------------------
     # Internal
@@ -170,37 +200,85 @@ class FallGuardAgent(BaseAgent):
         normal sitting/crouching won't trigger a fall event.
         
         Optionally boosts confidence with ML predictions if enabled.
+        Can use trained model instead of rules if configured.
         """
-        # GATE: Must have meaningful downward velocity to even consider a fall
-        if f.velocity < 0.02:
+        # If using trained model, get prediction from it
+        if self._use_trained_model and self._trained_model:
+            prediction = self._trained_model.update(f)
+            return prediction['fall_probability']
+        
+        # DEBUG: Log velocity every 30 frames (~1 second)
+        import random
+        if random.random() < 0.03:  # ~3% of frames
+            print(f"[DEBUG] velocity={f.velocity:.4f}, ground_prox={f.ground_proximity:.3f}, torso={f.torso_angle:.1f}, centroid_y={f.body_centroid_y:.3f}")
+        
+        # Otherwise use rule-based detection
+        # CRITICAL GATE: Must have rapid downward velocity to distinguish fall from lying down
+        # This prevents false positives when someone is sleeping or lying down intentionally
+        if f.velocity < 0.015:  # Lowered back to be more sensitive
             return 0.0
 
         score = 0.0
 
         # Signal 1: Rapid downward velocity (positive velocity = moving down)
-        score += min(0.30, (f.velocity - 0.02) * 10)
+        # This is the PRIMARY signal - without it, no fall
+        # BUT: velocity alone is not enough - need at least one other signal
+        velocity_score = min(0.30, (f.velocity - 0.015) * 10)  # Reduced max from 0.40 to 0.30
+        score += velocity_score
 
-        # Signal 2: High torso angle (leaning / horizontal)
-        if f.torso_angle > 35:
-            score += min(0.25, (f.torso_angle - 35) / 55 * 0.25)
+        # Signal 2: High torso angle (leaning / horizontal) OR horizontal body position
+        torso_score = 0.0
+        if f.torso_angle > 30:  # Sideways lean
+            torso_score = min(0.25, (f.torso_angle - 30) / 60 * 0.25)  # Increased weight
+            score += torso_score
+        elif f.is_horizontal:  # Body is horizontal (lying down)
+            torso_score = 0.25  # Full score for horizontal position
+            score += torso_score
 
         # Signal 3: Ground proximity (body low in frame)
-        if f.ground_proximity > 0.5:
-            score += min(0.25, (f.ground_proximity - 0.5) / 0.5 * 0.25)
+        # This is CRITICAL - must be close to ground for a fall
+        ground_score = 0.0
+        if f.ground_proximity > 0.45:  # Lowered from 0.5
+            ground_score = min(0.25, (f.ground_proximity - 0.45) / 0.55 * 0.25)  # Increased weight
+            score += ground_score
 
         # Signal 4: Centroid significantly below baseline
+        drop_score = 0.0
         if self._baseline_centroid is not None:
             drop = f.body_centroid_y - self._baseline_centroid
-            if drop > 0.12:
-                score += min(0.20, (drop - 0.12) * 3)
+            if drop > 0.08:  # Lowered from 0.10
+                drop_score = min(0.20, (drop - 0.08) * 4)
+                score += drop_score
+        
+        # CRITICAL: Require velocity + at least one other strong signal
+        # This prevents false positives from fast movements like jumping or waving
+        has_ground_proximity = f.ground_proximity > 0.45
+        has_torso_angle = f.torso_angle > 30 or f.is_horizontal
+        has_baseline_drop = (self._baseline_centroid is not None and 
+                            (f.body_centroid_y - self._baseline_centroid) > 0.08)
+        
+        other_signals = sum([has_ground_proximity, has_torso_angle, has_baseline_drop])
+        
+        # If only velocity is high but no other signals, reduce confidence dramatically
+        if other_signals == 0:
+            score *= 0.3  # Reduce to 30% if only velocity detected
 
         rule_confidence = min(1.0, score)
         
         # Boost with ML if enabled
+        final_confidence = rule_confidence
         if self._use_ml_boost and self._ml_booster:
-            return self._ml_booster.boost_confidence("FallGuard", rule_confidence, f)
+            final_confidence = self._ml_booster.boost_confidence("FallGuard", rule_confidence, f)
         
-        return rule_confidence
+        # DEBUG: Log when confidence is high
+        if rule_confidence > 0.2:
+            horiz_flag = "HORIZ" if f.is_horizontal else ""
+            if self._use_ml_boost:
+                print(f"[DEBUG] RULE={rule_confidence:.3f} → ML_BOOSTED={final_confidence:.3f} | vel={velocity_score:.3f}, torso={torso_score:.3f}, ground={ground_score:.3f}, drop={drop_score:.3f} {horiz_flag}")
+            else:
+                print(f"[DEBUG] CONFIDENCE={rule_confidence:.3f} | vel={velocity_score:.3f}, torso={torso_score:.3f}, ground={ground_score:.3f}, drop={drop_score:.3f} {horiz_flag}")
+        
+        return final_confidence
 
     def _compute_recovery_score(self, f: PoseFeatures) -> float:
         """Assess whether the subject has recovered (0–1)."""
@@ -236,7 +314,7 @@ class FallGuardAgent(BaseAgent):
         timer_remaining = 0.0
         if timer_active and self._timer_start is not None:
             elapsed = now - self._timer_start
-            timer_remaining = max(0.0, self.recovery_window - elapsed)
+            timer_remaining = max(0.0, self._recovery_window - elapsed)
 
         summaries = {
             AgentStateName.NORMAL: "System operating normally. No events detected.",

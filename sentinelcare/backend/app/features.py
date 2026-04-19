@@ -74,6 +74,12 @@ class FeatureExtractor:
         dx = hip_mid_x - shoulder_mid_x
         dy = hip_mid_y - shoulder_mid_y
         torso_angle = math.degrees(math.atan2(abs(dx), dy)) if dy != 0 else 0.0
+        
+        # Horizontal body detection: when lying down, shoulder and hip Y are similar
+        # In upright position, hip_y > shoulder_y (hip is lower in frame)
+        # When horizontal, hip_y ≈ shoulder_y (both at same height)
+        vertical_separation = abs(hip_mid_y - shoulder_mid_y)
+        is_horizontal = vertical_separation < 0.15  # Less than 15% of frame height
 
         # Velocity: centroid displacement frame-to-frame
         velocity = 0.0
@@ -126,6 +132,7 @@ class FeatureExtractor:
             repetition_score=round(repetition_score, 4),
             asymmetry_score=round(asymmetry_score, 4),
             body_centroid_x=round(body_centroid_x, 4),
+            is_horizontal=is_horizontal,
         )
 
     def get_rapid_drop(self, window: int = 5) -> float:

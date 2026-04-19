@@ -52,6 +52,7 @@ class PoseFeatures(BaseModel):
     repetition_score: float = 0.0  # For SeizureAgent
     asymmetry_score: float = 0.0   # For StrokeAgent
     body_centroid_x: float = 0.0   # For WanderingAgent
+    is_horizontal: bool = False    # For FallGuard: True when body is horizontal
 
 
 # ---------------------------------------------------------------------------
@@ -131,13 +132,17 @@ class AppConfig(BaseModel):
     video_source: str = "0"  # "0" for webcam, or path to video file
     recovery_window: float = 10.0  # seconds
     location_label: str = "Living Room"
-    fall_confidence_threshold: float = 0.55
+    fall_confidence_threshold: float = 0.35  # Lowered from 0.55 for better sensitivity
     show_pose_overlay: bool = True
     frame_skip: int = 0  # process every Nth frame (0 = every frame)
     
     # ML enhancement
-    use_ml_boost: bool = True  # Enable ML confidence boosting
+    use_ml_boost: bool = False  # DISABLED: ML boost was reducing confidence below threshold
     ml_weight: float = 0.3  # Weight given to ML predictions (0-1)
+    
+    # Trained model (alternative to rule-based)
+    use_trained_model: bool = False  # Trained model has false positives, using rules
+    trained_model_path: str = "app/models/fall_detector.pkl"
     
     # Agent enable/disable flags
     enabled_agents: dict[str, bool] = {

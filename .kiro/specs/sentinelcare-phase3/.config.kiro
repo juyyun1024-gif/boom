@@ -1,1 +1,9 @@
 {"specId": "2fc54796-c34a-4244-9e4f-4e338f9bfafd", "workflowType": "requirements-first", "specType": "feature"}
+# Uninstall the conflicting packages first
+pip uninstall -y tensorflow numpy ml-dtypes scikit-learn
+
+# Reinstall with compatible versions
+pip install -r requirements-training.txt
+
+# Then run training
+python train_fall_model.py

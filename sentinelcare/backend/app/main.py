@@ -116,6 +116,29 @@ async def get_config():
     return config.model_dump()
 
 
+@app.get("/debug/features")
+async def get_debug_features():
+    """Debug endpoint to see current feature values."""
+    return {
+        "message": "Feature values are sent in WebSocket messages",
+        "tip": "Open browser console and look for 'features' in frame_update messages",
+        "check": "Look for velocity, ground_proximity, torso_angle values"
+    }
+
+
+@app.get("/debug/thresholds")
+async def get_debug_thresholds():
+    """Show current detection thresholds."""
+    return {
+        "velocity_threshold": 0.025,
+        "confidence_threshold": config.fall_confidence_threshold,
+        "sustained_frames_required": 5,
+        "ground_proximity_threshold": 0.5,
+        "torso_angle_threshold": 35,
+        "tip": "If velocity is below 0.025 during your fall, we need to lower it"
+    }
+
+
 @app.post("/alerts/test")
 async def test_alert():
     """Generate a test critical alert."""
@@ -211,6 +234,8 @@ async def _vision_loop(ws: WebSocket) -> None:
                 confidence_threshold=config.fall_confidence_threshold,
                 use_ml_boost=config.use_ml_boost,
                 ml_weight=config.ml_weight,
+                use_trained_model=config.use_trained_model,
+                trained_model_path=config.trained_model_path,
             )
             orchestrator.register_agent("FallGuard", fall_agent)
         
