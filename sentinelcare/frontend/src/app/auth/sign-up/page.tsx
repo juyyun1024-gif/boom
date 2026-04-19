@@ -60,7 +60,6 @@ export default function SignUpPage() {
                 d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               <path d="M12 15.5l-3.5-3.1a2.4 2.4 0 0 1-.7-1.8c0-1.3 1.1-2.4 2.5-2.4.7 0 1.3.3 1.7.7.4-.4 1-.7 1.7-.7 1.4 0 2.5 1.1 2.5 2.4 0 .7-.3 1.3-.7 1.8L12 15.5z" fill="currentColor" stroke="none" />
             </svg>
-            </svg>
           </div>
           <div>
             <h1 className="text-2xl font-bold text-white tracking-tight">
