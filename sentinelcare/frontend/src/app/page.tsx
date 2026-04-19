@@ -66,11 +66,11 @@ export default function Dashboard() {
 
   // Sync emergency contacts + location to backend for auto-email on critical alert
   useEffect(() => {
-    if (!settings || !connected) return;
+    if (!connected) return;
 
     const sync = async () => {
       let hospital = null;
-      if (settings.notify_nearest_hospital && location?.latitude && location?.longitude) {
+      if (settings?.notify_nearest_hospital && location?.latitude && location?.longitude) {
         hospital = await fetchNearestHospital(
           Number(location.latitude),
           Number(location.longitude)

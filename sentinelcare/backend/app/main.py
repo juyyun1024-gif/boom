@@ -222,8 +222,9 @@ async def set_alert_config(payload: AlertContactsPayload):
 def _send_alert_email_for_event(event) -> bool:
     """Send alert email using stored contacts/location. Called from vision loop."""
     emails = [c["email"] for c in _alert_contacts if c.get("email")]
+    logger.info(f"Auto-email: {len(_alert_contacts)} contacts stored, {len(emails)} with email addresses")
     if not emails:
-        logger.info("No emergency contact emails configured — skipping auto-email.")
+        logger.warning("No emergency contact emails configured — skipping auto-email.")
         return False
 
     return send_alert_email(

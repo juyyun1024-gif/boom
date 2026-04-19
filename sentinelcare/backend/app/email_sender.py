@@ -162,20 +162,23 @@ def send_alert_email(
     """
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = f"{email_config.from_name} <{email_config.from_email}>"
-        msg["To"] = ", ".join(to_emails)
+        for recipient in to_emails:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = f"{email_config.from_name} <{email_config.from_email}>"
+            msg["To"] = recipient
 
-        msg.attach(MIMEText(body_text, "plain"))
-        msg.attach(MIMEText(body_html, "html"))
+            msg.attach(MIMEText(body_text, "plain"))
+            msg.attach(MIMEText(body_html, "html"))
 
-        with smtplib.SMTP(email_config.smtp_host, email_config.smtp_port) as server:
-            server.starttls()
-            server.login(email_config.smtp_user, email_config.smtp_password)
-            server.sendmail(email_config.from_email, to_emails, msg.as_string())
+            with smtplib.SMTP(email_config.smtp_host, email_config.smtp_port) as server:
+                server.starttls()
+                server.login(email_config.smtp_user, email_config.smtp_password)
+                server.sendmail(email_config.from_email, [recipient], msg.as_string())
 
-        logger.info(f"Alert email sent to {len(to_emails)} recipient(s): {', '.join(to_emails)}")
+            logger.info(f"Alert email sent to: {recipient}")
+
+        logger.info(f"Alert emails sent to {len(to_emails)} recipient(s): {', '.join(to_emails)}")
         return True
 
     except Exception as e:
