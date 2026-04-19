@@ -169,7 +169,7 @@ class FallDetectionLSTM:
 class TrainedModelAgent:
     """Wrapper agent that uses trained LSTM model for fall detection.
     
-    This is an alternative to the rule-based FallGuardAgent.
+    This is an alternative to the rule-based ResponseGuardAgent.
     Can be used side-by-side for comparison.
     """
     

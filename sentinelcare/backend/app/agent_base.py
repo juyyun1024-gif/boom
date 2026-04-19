@@ -60,6 +60,6 @@ class BaseAgent(ABC):
         """Return the agent's display name.
         
         Returns:
-            Agent name string (e.g., "FallGuard", "Seizure", "Stroke", "Wandering")
+            Agent name string (e.g., "ResponseGuard", "Seizure", "Stroke", "Wandering")
         """
         pass

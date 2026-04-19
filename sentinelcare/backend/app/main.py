@@ -12,7 +12,7 @@ from typing import Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agent import FallGuardAgent
+from .agent import ResponseGuardAgent
 from .event_store import event_store
 from .features import FeatureExtractor
 from .models import AppConfig, WSMessage, AgentStateName, PoseFeatures
@@ -227,9 +227,9 @@ async def _vision_loop(ws: WebSocket) -> None:
         # Clear existing agents
         orchestrator = AgentOrchestrator()
         
-        # Register FallGuardAgent if enabled
-        if config.enabled_agents.get("FallGuard", True):
-            fall_agent = FallGuardAgent(
+        # Register ResponseGuardAgent if enabled
+        if config.enabled_agents.get("ResponseGuard", True):
+            response_agent = ResponseGuardAgent(
                 recovery_window=config.recovery_window,
                 confidence_threshold=config.fall_confidence_threshold,
                 use_ml_boost=config.use_ml_boost,
@@ -237,7 +237,7 @@ async def _vision_loop(ws: WebSocket) -> None:
                 use_trained_model=config.use_trained_model,
                 trained_model_path=config.trained_model_path,
             )
-            orchestrator.register_agent("FallGuard", fall_agent)
+            orchestrator.register_agent("ResponseGuard", response_agent)
         
         # Register SeizureAgent if enabled
         if config.enabled_agents.get("Seizure", True):
@@ -320,7 +320,7 @@ async def _vision_loop(ws: WebSocket) -> None:
             
             # Add unavailable/disabled agents for UI display
             from .models import AgentState, AgentStateName
-            all_agent_names = ["FallGuard", "Seizure", "Stroke", "Wandering"]
+            all_agent_names = ["ResponseGuard", "Seizure", "Stroke", "Wandering"]
             registered_names = set(orchestrator._agents.keys())
             
             for agent_name in all_agent_names:
@@ -335,11 +335,11 @@ async def _vision_loop(ws: WebSocket) -> None:
                     )
                     agent_states.append(unavailable_agent)
             
-            # Get FallGuard state for backward compatibility
-            fallguard_state = None
+            # Get ResponseGuard state for backward compatibility
+            responseguard_state = None
             for state in agent_states:
-                if state.agent_name == "FallGuard":
-                    fallguard_state = state
+                if state.agent_name == "ResponseGuard":
+                    responseguard_state = state
                     break
 
             # Encode frame
@@ -349,7 +349,7 @@ async def _vision_loop(ws: WebSocket) -> None:
             msg = WSMessage(
                 type="frame_update",
                 frame=b64_frame,
-                agent_state=fallguard_state,  # Backward compatibility
+                agent_state=responseguard_state,  # Backward compatibility
                 agents=agent_states,  # NEW: all agent states
                 features=worst_features,
                 pose_detected=any_detected,
