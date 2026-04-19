@@ -52,7 +52,7 @@ class PoseFeatures(BaseModel):
     repetition_score: float = 0.0  # For SeizureAgent
     asymmetry_score: float = 0.0   # For StrokeAgent
     body_centroid_x: float = 0.0   # For WanderingAgent
-    is_horizontal: bool = False    # For FallGuard: True when body is horizontal
+    is_horizontal: bool = False    # For ResponseGuard: True when body is horizontal
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ class AgentState(BaseModel):
 class Event(BaseModel):
     event_id: str = Field(default_factory=lambda: f"evt_{uuid.uuid4().hex[:8]}")
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    agent: str = "FallGuard"
+    agent: str = "ResponseGuard"
     event_type: str = "unknown"
     status: str = "unknown"
     confidence: float = 0.0
@@ -146,7 +146,7 @@ class AppConfig(BaseModel):
     
     # Agent enable/disable flags
     enabled_agents: dict[str, bool] = {
-        "FallGuard": True,
+        "ResponseGuard": True,
         "Seizure": True,
         "Stroke": True,
         "Wandering": False,

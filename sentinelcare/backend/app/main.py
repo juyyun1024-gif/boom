@@ -15,6 +15,7 @@ from pydantic import BaseModel as PydanticBaseModel
 
 from .agent import FallGuardAgent
 from .email_sender import send_alert_email
+from .agent import ResponseGuardAgent
 from .event_store import event_store
 from .features import FeatureExtractor
 from .models import AppConfig, WSMessage, AgentStateName, PoseFeatures
@@ -273,17 +274,17 @@ async def _vision_loop(ws: WebSocket) -> None:
     extractors: dict[int, FeatureExtractor] = {}
     
     # Create AgentOrchestrator and register all agents
-    orchestrator = AgentOrchestrator()
+    # Use a list to hold orchestrator so we can modify it from nested function
+    orchestrator_ref = [AgentOrchestrator()]
     
     def rebuild_orchestrator():
         """Rebuild orchestrator based on current config."""
-        nonlocal orchestrator
-        # Clear existing agents
-        orchestrator = AgentOrchestrator()
+        # Clear existing agents by creating new orchestrator
+        orchestrator_ref[0] = AgentOrchestrator()
         
-        # Register FallGuardAgent if enabled
-        if config.enabled_agents.get("FallGuard", True):
-            fall_agent = FallGuardAgent(
+        # Register ResponseGuardAgent if enabled
+        if config.enabled_agents.get("ResponseGuard", True):
+            response_agent = ResponseGuardAgent(
                 recovery_window=config.recovery_window,
                 confidence_threshold=config.fall_confidence_threshold,
                 use_ml_boost=config.use_ml_boost,
@@ -291,7 +292,7 @@ async def _vision_loop(ws: WebSocket) -> None:
                 use_trained_model=config.use_trained_model,
                 trained_model_path=config.trained_model_path,
             )
-            orchestrator.register_agent("FallGuard", fall_agent)
+            orchestrator_ref[0].register_agent("ResponseGuard", response_agent)
         
         # Register SeizureAgent if enabled
         if config.enabled_agents.get("Seizure", True):
@@ -301,7 +302,7 @@ async def _vision_loop(ws: WebSocket) -> None:
                 recovery_threshold=config.seizure_config.recovery_threshold,
                 history_window=config.seizure_config.history_window,
             )
-            orchestrator.register_agent("Seizure", seizure_agent)
+            orchestrator_ref[0].register_agent("Seizure", seizure_agent)
         
         # Register StrokeAgent if enabled
         if config.enabled_agents.get("Stroke", True):
@@ -312,7 +313,9 @@ async def _vision_loop(ws: WebSocket) -> None:
                 recovery_asymmetry_threshold=config.stroke_config.recovery_asymmetry_threshold,
                 recovery_motion_threshold=config.stroke_config.recovery_motion_threshold,
             )
-            orchestrator.register_agent("Stroke", stroke_agent)
+            orchestrator_ref[0].register_agent("Stroke", stroke_agent)
+        
+        logger.info(f"Orchestrator rebuilt with agents: {list(orchestrator_ref[0]._agents.keys())}")
     
     # Initial build
     rebuild_orchestrator()
@@ -371,12 +374,12 @@ async def _vision_loop(ws: WebSocket) -> None:
                     del extractors[idx]
 
             # Run orchestrator on worst-case person
-            agent_states = orchestrator.update(worst_features, any_detected)
+            agent_states = orchestrator_ref[0].update(worst_features, any_detected)
             
             # Add unavailable/disabled agents for UI display
             from .models import AgentState, AgentStateName
-            all_agent_names = ["FallGuard", "Seizure", "Stroke", "Wandering"]
-            registered_names = set(orchestrator._agents.keys())
+            all_agent_names = ["ResponseGuard", "Seizure", "Stroke", "Wandering"]
+            registered_names = set(orchestrator_ref[0]._agents.keys())
             
             for agent_name in all_agent_names:
                 if agent_name not in registered_names:
@@ -390,11 +393,11 @@ async def _vision_loop(ws: WebSocket) -> None:
                     )
                     agent_states.append(unavailable_agent)
             
-            # Get FallGuard state for backward compatibility
-            fallguard_state = None
+            # Get ResponseGuard state for backward compatibility
+            responseguard_state = None
             for state in agent_states:
-                if state.agent_name == "FallGuard":
-                    fallguard_state = state
+                if state.agent_name == "ResponseGuard":
+                    responseguard_state = state
                     break
 
             # Encode frame
@@ -404,7 +407,7 @@ async def _vision_loop(ws: WebSocket) -> None:
             msg = WSMessage(
                 type="frame_update",
                 frame=b64_frame,
-                agent_state=fallguard_state,  # Backward compatibility
+                agent_state=responseguard_state,  # Backward compatibility
                 agents=agent_states,  # NEW: all agent states
                 features=worst_features,
                 pose_detected=any_detected,
@@ -474,20 +477,25 @@ async def websocket_endpoint(ws: WebSocket):
 
                 if msg.get("type") == "reset_agent":
                     # Reset all agents via orchestrator
-                    if 'orchestrator' in locals():
-                        orchestrator.reset_all()
+                    orchestrator_ref[0].reset_all()
                     logger.info("All agents reset requested via WebSocket")
                 elif msg.get("type") == "toggle_agent":
                     # Toggle agent on/off
                     agent_name = msg.get("agent")
                     enabled = msg.get("enabled", True)
+                    logger.info(f"Received toggle request: {agent_name} -> {enabled}")
+                    logger.info(f"Current enabled_agents: {config.enabled_agents}")
+                    
                     if agent_name in config.enabled_agents:
                         config.enabled_agents[agent_name] = enabled
-                        logger.info(f"Agent {agent_name} toggled to {enabled}")
+                        logger.info(f"Updated enabled_agents: {config.enabled_agents}")
                         
                         # Rebuild orchestrator with new config
                         if hasattr(ws.state, 'rebuild_orchestrator'):
                             ws.state.rebuild_orchestrator()
+                            logger.info("Orchestrator rebuilt successfully")
+                        else:
+                            logger.warning("rebuild_orchestrator not found in ws.state")
                         
                         # Send confirmation
                         await ws.send_json({
@@ -495,6 +503,8 @@ async def websocket_endpoint(ws: WebSocket):
                             "agent": agent_name,
                             "enabled": enabled
                         })
+                    else:
+                        logger.warning(f"Agent {agent_name} not found in enabled_agents")
                 elif msg.get("type") == "update_config":
                     config = AppConfig(**msg.get("config", {}))
                     logger.info(f"Config updated: {config}")

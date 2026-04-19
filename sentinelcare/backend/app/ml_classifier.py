@@ -156,7 +156,7 @@ class MLConfidenceBooster:
         """Boost rule-based confidence with ML prediction.
         
         Args:
-            agent_name: Name of the agent (FallGuard, Seizure, Stroke)
+            agent_name: Name of the agent (ResponseGuard, Seizure, Stroke)
             rule_confidence: Confidence from rule-based detection (0-1)
             features: Current pose features
             
@@ -168,7 +168,7 @@ class MLConfidenceBooster:
         
         # Map agent name to ML prediction
         agent_to_action = {
-            "FallGuard": "fall",
+            "ResponseGuard": "fall",
             "Seizure": "seizure",
             "Stroke": "stroke",
         }

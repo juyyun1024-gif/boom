@@ -24,7 +24,7 @@ class AgentOrchestrator:
         """Register a new agent with the orchestrator.
         
         Args:
-            name: Unique identifier for this agent (e.g., "FallGuard", "Seizure")
+            name: Unique identifier for this agent (e.g., "ResponseGuard", "Seizure")
             agent: Agent instance implementing BaseAgent interface
             
         Raises:

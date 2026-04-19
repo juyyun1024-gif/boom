@@ -1,4 +1,4 @@
-"""FallGuard Agent — state machine for fall/collapse detection + recovery monitoring."""
+"""ResponseGuard Agent — state machine for fall/collapse detection + recovery monitoring."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from .models import AgentState, AgentStateName, Event, Alert, PoseFeatures
 from .event_store import event_store
 
 
-class FallGuardAgent(BaseAgent):
-    """Rule-based fall detection agent with recovery window escalation.
+class ResponseGuardAgent(BaseAgent):
+    """Rule-based response detection agent with recovery window escalation.
 
     States
     ------
@@ -35,7 +35,7 @@ class FallGuardAgent(BaseAgent):
     ) -> None:
         super().__init__(recovery_window, confidence_threshold)
         
-        # FallGuard-specific state
+        # ResponseGuard-specific state
         self._event_start: float | None = None
         self._location = "Living Room"
 
@@ -67,7 +67,7 @@ class FallGuardAgent(BaseAgent):
                 model_path=trained_model_path,
                 threshold=confidence_threshold
             )
-            print(f"[FallGuard] Using trained model from {trained_model_path}")
+            print(f"[ResponseGuard] Using trained model from {trained_model_path}")
 
     # ------------------------------------------------------------------
     # Public API (BaseAgent implementation)
@@ -75,7 +75,7 @@ class FallGuardAgent(BaseAgent):
     
     def get_agent_name(self) -> str:
         """Return the agent's display name."""
-        return "FallGuard"
+        return "ResponseGuard"
 
     def update(self, features: PoseFeatures, pose_detected: bool) -> AgentState:
         """Process one frame's features and return updated agent state."""
@@ -268,7 +268,7 @@ class FallGuardAgent(BaseAgent):
         # Boost with ML if enabled
         final_confidence = rule_confidence
         if self._use_ml_boost and self._ml_booster:
-            final_confidence = self._ml_booster.boost_confidence("FallGuard", rule_confidence, f)
+            final_confidence = self._ml_booster.boost_confidence("ResponseGuard", rule_confidence, f)
         
         # DEBUG: Log when confidence is high
         if rule_confidence > 0.2:
