@@ -1,0 +1,7 @@
+# Training dependencies (optional - only needed for model training)
+# Install with: pip install -r requirements-training.txt
+
+# Use newer versions compatible with your existing packages
+tensorflow==2.18.0
+scikit-learn==1.5.2
+numpy>=1.26.0
