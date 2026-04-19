@@ -194,7 +194,8 @@ export default function AlertSettings() {
           <div className="space-y-3">
             <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Home Location</h4>
             
-            {location?.home_address && !isEditingLocation ? (
+            {/* Display mode: show saved address */}
+            {location?.home_address && !isEditingLocation && (
               <div className="p-3 rounded-lg bg-slate-800/30 border border-slate-700/50">
                 <div className="flex items-start justify-between">
                   <div className="flex items-start gap-3">
@@ -212,17 +213,22 @@ export default function AlertSettings() {
                     </div>
                   </div>
                   <button
-                    onClick={() => {
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setAddressInput(location.home_address);
                       setIsEditingLocation(true);
                     }}
-                    className="text-xs text-slate-400 hover:text-slate-200"
+                    className="text-xs text-cyan-400 hover:text-cyan-300 font-medium px-2 py-1 rounded hover:bg-slate-700/50 transition-colors"
                   >
                     Edit
                   </button>
                 </div>
               </div>
-            ) : (
+            )}
+
+            {/* Edit / Add mode: show input form */}
+            {(!location?.home_address || isEditingLocation) && (
               <div className="space-y-2">
                 <div className="flex gap-2">
                   <input
@@ -231,8 +237,10 @@ export default function AlertSettings() {
                     onChange={(e) => setAddressInput(e.target.value)}
                     placeholder="Enter your home address"
                     className="flex-1 px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-700 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
+                    autoFocus={isEditingLocation}
                   />
                   <button
+                    type="button"
                     onClick={handleSaveAddress}
                     disabled={savingLocation || !addressInput.trim()}
                     className="px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 text-sm font-medium hover:bg-emerald-500/30 disabled:opacity-50 transition-colors"
@@ -241,6 +249,7 @@ export default function AlertSettings() {
                   </button>
                   {isEditingLocation && (
                     <button
+                      type="button"
                       onClick={() => {
                         setAddressInput('');
                         setIsEditingLocation(false);
@@ -252,6 +261,7 @@ export default function AlertSettings() {
                   )}
                 </div>
                 <button
+                  type="button"
                   onClick={handleUseCurrentLocation}
                   disabled={geolocating}
                   className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors"
