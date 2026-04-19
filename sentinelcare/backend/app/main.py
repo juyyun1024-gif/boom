@@ -13,9 +13,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel as PydanticBaseModel
 
-from .agent import FallGuardAgent
-from .email_sender import send_alert_email
 from .agent import ResponseGuardAgent
+from .email_sender import send_alert_email
 from .event_store import event_store
 from .features import FeatureExtractor
 from .models import AppConfig, WSMessage, AgentStateName, PoseFeatures
