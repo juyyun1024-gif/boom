@@ -172,11 +172,13 @@ export default function Dashboard() {
           <AlertPanel alert={latestAlert} onAcknowledge={handleAcknowledge} />
           <FutureAgents />
         </div>
+      </div>
 
       {/* Bottom: Event Log */}
       <div className="h-[200px] shrink-0">
         <EventLog events={events} />
       </div>
-    </main>
+      </main>
+    </>
   );
 }

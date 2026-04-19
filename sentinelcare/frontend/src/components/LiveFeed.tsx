@@ -13,22 +13,6 @@ export default function LiveFeed({ frame, poseDetected, connected, numPeople }: 
   const [isPaused, setIsPaused] = useState(false);
 
   return (
-    <div className="glass-card overflow-hidden flex flex-col h-full group">
-      {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.04]">
-        <div className="flex items-center gap-2.5">
-          <div className="relative flex items-center justify-center">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                connected
-                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
-                  : "bg-red-400 animate-pulse"
-              }`}
-            />
-          </div>
-          <span className="section-label">Live Feed</span>
-        </div>
-        <div className="flex items-center gap-2.5">
     <div className="glass-card overflow-hidden flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
@@ -79,45 +63,6 @@ export default function LiveFeed({ frame, poseDetected, connected, numPeople }: 
 
       {/* Video area */}
       <div className="relative flex-1 bg-black/50 flex items-center justify-center min-h-[300px]">
-        {frame ? (
-          <>
-            <img
-              src={`data:image/jpeg;base64,${frame}`}
-              alt="Live camera feed with pose overlay"
-              className="w-full h-full object-contain"
-              style={{ imageRendering: "auto" }}
-            />
-            {/* Subtle scanline overlay */}
-            <div className="absolute inset-0 scanline-overlay" />
-          </>
-          <span className="text-xs text-slate-500">Camera 1</span>
-          
-          {/* Privacy Mode Toggle */}
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              isPaused 
-                ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" 
-                : "bg-slate-700/50 text-slate-400 hover:bg-slate-600/50 hover:text-slate-300"
-            }`}
-            title={isPaused ? "Resume monitoring" : "Pause monitoring (Privacy mode)"}
-          >
-            {isPaused ? (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Feed */}
-      <div className="relative flex-1 bg-black/40 flex items-center justify-center min-h-[300px]">
         {isPaused ? (
           <div className="flex flex-col items-center gap-4 text-slate-400">
             <div className="w-20 h-20 rounded-full bg-amber-500/20 flex items-center justify-center">
@@ -137,12 +82,29 @@ export default function LiveFeed({ frame, poseDetected, connected, numPeople }: 
             </button>
           </div>
         ) : frame ? (
-          <img
-            src={`data:image/jpeg;base64,${frame}`}
-            alt="Live camera feed with pose overlay"
-            className="w-full h-full object-contain"
-            style={{ imageRendering: "auto" }}
-          />
+          <div className="relative w-full h-full">
+            <img
+              src={`data:image/jpeg;base64,${frame}`}
+              alt="Live camera feed with pose overlay"
+              className="w-full h-full object-contain"
+              style={{ imageRendering: "auto" }}
+            />
+            {/* Subtle scanline overlay */}
+            <div className="absolute inset-0 scanline-overlay" />
+            
+            {/* Privacy Mode Toggle */}
+            <div className="absolute top-2 right-2">
+              <button
+                onClick={() => setIsPaused(true)}
+                className="p-1.5 rounded-lg transition-colors bg-slate-700/50 text-slate-400 hover:bg-slate-600/50 hover:text-slate-300"
+                title="Pause monitoring (Privacy mode)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col items-center gap-4 text-slate-600">
             <div className="w-16 h-16 rounded-2xl bg-slate-800/50 flex items-center justify-center">
@@ -181,6 +143,7 @@ export default function LiveFeed({ frame, poseDetected, connected, numPeople }: 
         <div className="absolute top-3 right-3 w-4 h-4 border-r-2 border-t-2 border-cyan-500/20 rounded-tr" />
         <div className="absolute bottom-3 left-3 w-4 h-4 border-l-2 border-b-2 border-cyan-500/20 rounded-bl" />
         <div className="absolute bottom-3 right-3 w-4 h-4 border-r-2 border-b-2 border-cyan-500/20 rounded-br" />
+        
         {/* Bottom overlay: monitoring indicators */}
         {connected && !isPaused && (
           <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
