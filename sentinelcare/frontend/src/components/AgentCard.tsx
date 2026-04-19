@@ -39,7 +39,7 @@ export default function AgentCard({ agentState, poseDetected }: AgentCardProps) 
     }
   };
 
-  const config = agentConfig[agentState.agent_name as keyof typeof agentConfig] || agentConfig.FallGuard;
+  const config = agentConfig[agentState.agent_name as keyof typeof agentConfig] || agentConfig.ResponseGuard;
 
   // Confidence bar color
   const barColor =
