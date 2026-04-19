@@ -75,7 +75,7 @@ class ResponseGuardAgent(BaseAgent):
     
     def get_agent_name(self) -> str:
         """Return the agent's display name."""
-        return "ResponseGuard"
+        return "Fall"
 
     def update(self, features: PoseFeatures, pose_detected: bool) -> AgentState:
         """Process one frame's features and return updated agent state."""

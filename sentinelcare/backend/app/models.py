@@ -79,7 +79,7 @@ class AgentState(BaseModel):
 class Event(BaseModel):
     event_id: str = Field(default_factory=lambda: f"evt_{uuid.uuid4().hex[:8]}")
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    agent: str = "ResponseGuard"
+    agent: str = "Fall"
     event_type: str = "unknown"
     status: str = "unknown"
     confidence: float = 0.0
@@ -146,7 +146,7 @@ class AppConfig(BaseModel):
     
     # Agent enable/disable flags
     enabled_agents: dict[str, bool] = {
-        "ResponseGuard": True,
+        "Fall": True,
         "Seizure": True,
         "Stroke": True,
         "Wandering": False,

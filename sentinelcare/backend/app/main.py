@@ -282,7 +282,7 @@ async def _vision_loop(ws: WebSocket) -> None:
         orchestrator_ref[0] = AgentOrchestrator()
         
         # Register ResponseGuardAgent if enabled
-        if config.enabled_agents.get("ResponseGuard", True):
+        if config.enabled_agents.get("Fall", True):
             response_agent = ResponseGuardAgent(
                 recovery_window=config.recovery_window,
                 confidence_threshold=config.fall_confidence_threshold,
@@ -291,7 +291,7 @@ async def _vision_loop(ws: WebSocket) -> None:
                 use_trained_model=config.use_trained_model,
                 trained_model_path=config.trained_model_path,
             )
-            orchestrator_ref[0].register_agent("ResponseGuard", response_agent)
+            orchestrator_ref[0].register_agent("Fall", response_agent)
         
         # Register SeizureAgent if enabled
         if config.enabled_agents.get("Seizure", True):
@@ -377,7 +377,7 @@ async def _vision_loop(ws: WebSocket) -> None:
             
             # Add unavailable/disabled agents for UI display
             from .models import AgentState, AgentStateName
-            all_agent_names = ["ResponseGuard", "Seizure", "Stroke", "Wandering"]
+            all_agent_names = ["Fall", "Seizure", "Stroke", "Wandering"]
             registered_names = set(orchestrator_ref[0]._agents.keys())
             
             for agent_name in all_agent_names:
@@ -392,11 +392,11 @@ async def _vision_loop(ws: WebSocket) -> None:
                     )
                     agent_states.append(unavailable_agent)
             
-            # Get ResponseGuard state for backward compatibility
-            responseguard_state = None
+            # Get Fall state for backward compatibility
+            fall_state = None
             for state in agent_states:
-                if state.agent_name == "ResponseGuard":
-                    responseguard_state = state
+                if state.agent_name == "Fall":
+                    fall_state = state
                     break
 
             # Encode frame
@@ -406,7 +406,7 @@ async def _vision_loop(ws: WebSocket) -> None:
             msg = WSMessage(
                 type="frame_update",
                 frame=b64_frame,
-                agent_state=responseguard_state,  # Backward compatibility
+                agent_state=fall_state,  # Backward compatibility
                 agents=agent_states,  # NEW: all agent states
                 features=worst_features,
                 pose_detected=any_detected,

@@ -30,7 +30,7 @@ export default function Dashboard() {
   const [consentChecked, setConsentChecked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [enabledAgents, setEnabledAgents] = useState<Set<string>>(
-    new Set(["ResponseGuard", "Seizure", "Stroke"])
+    new Set(["Fall", "Seizure", "Stroke"])
   );
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyAlertInfo, setEmergencyAlertInfo] = useState<{
@@ -169,7 +169,7 @@ export default function Dashboard() {
   };
 
   const resetAllAgents = () => {
-    const allAgents = ["ResponseGuard", "Seizure", "Stroke"];
+    const allAgents = ["Fall", "Seizure", "Stroke"];
     setEnabledAgents(new Set(allAgents));
     
     // Send enable message for each agent

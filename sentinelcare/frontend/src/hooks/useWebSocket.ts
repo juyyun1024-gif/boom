@@ -71,7 +71,7 @@ export function useWebSocket(url: string) {
   const [connected, setConnected] = useState(false);
   const [frame, setFrame] = useState<string | null>(null);
   const [agentState, setAgentState] = useState<AgentState>({
-    agent_name: "FallGuard",
+    agent_name: "Fall",
     state: "normal",
     confidence: 0,
     event_type: "none",
