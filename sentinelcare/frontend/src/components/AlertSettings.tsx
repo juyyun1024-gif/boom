@@ -20,6 +20,7 @@ export default function AlertSettings() {
     geolocating,
     saveLocation,
     getCurrentLocation,
+    geocodeAddress,
   } = useUserLocation();
 
   const [isExpanded, setIsExpanded] = useState(false);
@@ -32,12 +33,12 @@ export default function AlertSettings() {
     
     setSavingLocation(true);
     try {
-      // For hackathon demo, we'll save the address without geocoding
-      // In production, you'd call the geocode API
+      // Geocode the address to get coordinates for hospital lookup
+      const coords = await geocodeAddress(addressInput);
       await saveLocation({
         home_address: addressInput,
-        latitude: null,
-        longitude: null,
+        latitude: coords?.lat ?? null,
+        longitude: coords?.lng ?? null,
         city: '',
         state: '',
         country: 'USA',
