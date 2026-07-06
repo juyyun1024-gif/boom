@@ -169,6 +169,8 @@ class MLConfidenceBooster:
         # Map agent name to ML prediction
         agent_to_action = {
             "Fall": "fall",
+            "FallGuard": "fall",
+            "ResponseGuard": "fall",
             "Seizure": "seizure",
             "Stroke": "stroke",
         }

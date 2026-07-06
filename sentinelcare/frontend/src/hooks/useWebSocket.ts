@@ -15,6 +15,14 @@ export interface AgentState {
   last_change: string;
   summary: string;
   available?: boolean;  // NEW: indicates if agent is currently active (defaults to true)
+  ai_enabled?: boolean;
+  model_source?: string;
+  model_status?: string;
+  model_confidence?: number;
+  rule_confidence?: number;
+  pose_quality?: number;
+  pose_reliable?: boolean;
+  visibility_reason?: string;
 }
 
 export interface PoseFeatures {
@@ -26,6 +34,10 @@ export interface PoseFeatures {
   motion_energy: number;
   stillness_score: number;
   ground_proximity: number;
+  pose_quality?: number;
+  pose_reliable?: boolean;
+  visibility_reason?: string;
+  visible_keypoints?: number;
 }
 
 export interface EventData {
@@ -60,6 +72,8 @@ export interface WSMessage {
   alert?: AlertData;
   pose_detected?: boolean;
   num_people?: number;
+  agent?: string;
+  enabled?: boolean;
 }
 
 // ---- Hook ----
@@ -67,11 +81,12 @@ export interface WSMessage {
 export function useWebSocket(url: string) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectRef = useRef<(() => void) | null>(null);
 
   const [connected, setConnected] = useState(false);
   const [frame, setFrame] = useState<string | null>(null);
   const [agentState, setAgentState] = useState<AgentState>({
-    agent_name: "Fall",
+    agent_name: "FallGuard",
     state: "normal",
     confidence: 0,
     event_type: "none",
@@ -104,8 +119,19 @@ export function useWebSocket(url: string) {
         const msg: WSMessage = JSON.parse(evt.data);
 
         if (msg.frame) setFrame(msg.frame);
-        if (msg.agent_state) setAgentState(msg.agent_state);
-        if (msg.agents) setAgents(msg.agents);  // NEW: handle multi-agent states
+        if (msg.agents) {
+          setAgents(msg.agents);  // NEW: handle multi-agent states
+          const primary =
+            msg.agents.find((agent) => agent.state === "critical_alert") ??
+            msg.agents.find((agent) => agent.state === "monitoring_recovery") ??
+            msg.agents.find((agent) => agent.state === "suspicious_event") ??
+            msg.agents.find((agent) => agent.agent_name === "FallGuard") ??
+            msg.agent_state ??
+            msg.agents[0];
+          if (primary) setAgentState(primary);
+        } else if (msg.agent_state) {
+          setAgentState(msg.agent_state);
+        }
         if (msg.features) setFeatures(msg.features);
         if (msg.pose_detected !== undefined) setPoseDetected(msg.pose_detected);
         if (msg.num_people !== undefined) setNumPeople(msg.num_people);
@@ -130,7 +156,7 @@ export function useWebSocket(url: string) {
     ws.onclose = () => {
       setConnected(false);
       console.log("[WS] Disconnected — reconnecting in 2s");
-      reconnectTimer.current = setTimeout(connect, 2000);
+      reconnectTimer.current = setTimeout(() => connectRef.current?.(), 2000);
     };
 
     ws.onerror = (err) => {
@@ -138,6 +164,10 @@ export function useWebSocket(url: string) {
       ws.close();
     };
   }, [url]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     connect();

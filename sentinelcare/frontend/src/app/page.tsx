@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -30,7 +30,7 @@ export default function Dashboard() {
   const [consentChecked, setConsentChecked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [enabledAgents, setEnabledAgents] = useState<Set<string>>(
-    new Set(["Fall", "Seizure", "Stroke"])
+    new Set(["FallGuard", "Seizure", "Stroke"])
   );
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyAlertInfo, setEmergencyAlertInfo] = useState<{
@@ -38,6 +38,7 @@ export default function Dashboard() {
     severity: string;
     timestamp: Date;
   } | null>(null);
+  const emergencyModalQueuedRef = useRef(false);
 
   const {
     connected,
@@ -116,15 +117,36 @@ export default function Dashboard() {
 
   // Monitor for critical alerts
   useEffect(() => {
-    if (agentState?.state === "CRITICAL_ALERT" && !showEmergencyModal) {
+    const criticalAgent =
+      agents.find((agent) => agent.state === "critical_alert") ??
+      (agentState?.state === "critical_alert" ? agentState : null);
+
+    if (!(criticalAgent || latestAlert) || showEmergencyModal || emergencyModalQueuedRef.current) {
+      return;
+    }
+
+    const alertType =
+      latestAlert?.event.event_type.replace(/_/g, " ") ??
+      criticalAgent?.event_type.replace(/_/g, " ") ??
+      "Critical Medical Event";
+    const timestamp = latestAlert ? new Date(latestAlert.triggered_at) : new Date();
+
+    emergencyModalQueuedRef.current = true;
+    const timeout = window.setTimeout(() => {
       setEmergencyAlertInfo({
-        type: agentState.alert_reason || "Critical Medical Event",
+        type: alertType,
         severity: "critical",
-        timestamp: new Date(),
+        timestamp,
       });
       setShowEmergencyModal(true);
-    }
-  }, [agentState?.state, showEmergencyModal]);
+      emergencyModalQueuedRef.current = false;
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeout);
+      emergencyModalQueuedRef.current = false;
+    };
+  }, [agents, agentState, latestAlert, showEmergencyModal]);
 
   const handleCloseEmergencyModal = () => {
     setShowEmergencyModal(false);
@@ -169,7 +191,7 @@ export default function Dashboard() {
   };
 
   const resetAllAgents = () => {
-    const allAgents = ["Fall", "Seizure", "Stroke"];
+    const allAgents = ["FallGuard", "Seizure", "Stroke"];
     setEnabledAgents(new Set(allAgents));
     
     // Send enable message for each agent

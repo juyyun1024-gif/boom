@@ -46,7 +46,19 @@ class SeizureAgent(BaseAgent):
         
         # Seizure-specific state tracking
         self._frames_since_suspicious = 0
-        self._frames_above_threshold = 0  # Track consecutive frames with high RepetitionScore
+        self._frames_above_threshold = 0
+        self._high_score_started_at: float | None = None
+        self._quiet_started_at: float | None = None
+        self._timer_pause_started: float | None = None
+        self._timer_paused_total = 0.0
+        self._score_ema = 0.0
+        self._last_seizure_score = 0.0
+        self._last_pose_quality = 0.0
+        self._last_pose_reliable = False
+        self._last_visibility_reason = "no_pose"
+        self._required_high_seconds = 2.0
+        self._confirm_seconds = 0.6
+        self._required_quiet_seconds = 1.0
 
     def get_agent_name(self) -> str:
         """Return the agent's display name."""
@@ -57,70 +69,97 @@ class SeizureAgent(BaseAgent):
         now = time.time()
 
         if not pose_detected:
+            self._mark_pose_unusable("no_pose", 0.0, now)
             return self._build_state(now)
 
-        repetition_score = features.repetition_score
+        self._last_pose_quality = features.pose_quality
+        self._last_pose_reliable = features.pose_reliable
+        self._last_visibility_reason = features.visibility_reason
+
+        if not features.pose_reliable:
+            self._mark_pose_unusable(features.visibility_reason, features.pose_quality, now)
+            return self._build_state(now)
+
+        self._resume_recovery_timer(now)
+        seizure_score = self._compute_seizure_confidence(features)
 
         # ---- State transitions ----------------------------------------
 
         if self._state == AgentStateName.NORMAL:
-            if repetition_score > self._confidence_threshold:
+            if seizure_score >= self._confidence_threshold:
+                if self._high_score_started_at is None:
+                    self._high_score_started_at = now
                 self._frames_above_threshold += 1
-                # Need 48 frames (2 seconds at 24 FPS) of high repetition score
-                if self._frames_above_threshold >= 48:
-                    self._transition(AgentStateName.SUSPICIOUS_EVENT, repetition_score, now)
+                if now - self._high_score_started_at >= self._required_high_seconds:
+                    self._transition(AgentStateName.SUSPICIOUS_EVENT, seizure_score, now)
                     self._frames_since_suspicious = 0
+                    self._quiet_started_at = None
             else:
+                if seizure_score < self._confidence_threshold * 0.75:
+                    self._high_score_started_at = None
                 self._frames_above_threshold = 0
 
         elif self._state == AgentStateName.SUSPICIOUS_EVENT:
             self._frames_since_suspicious += 1
-            self._confidence = max(self._confidence, repetition_score)
+            self._confidence = max(self._confidence, seizure_score)
             
-            if repetition_score > self._confidence_threshold:
-                # Sustained high repetition - confirm after 3+ frames
-                if self._frames_since_suspicious >= 3:
+            if seizure_score >= self._confidence_threshold * 0.85:
+                if now - self._last_change >= self._confirm_seconds:
                     self._transition(AgentStateName.MONITORING_RECOVERY, self._confidence, now)
                     self._timer_start = now
+                    self._timer_paused_total = 0.0
+                    self._timer_pause_started = None
                     self._log_event("seizure_suspected", "monitoring_recovery",
-                                    "Seizure-like repetitive motion detected. Monitoring for recovery.")
-            else:
-                # RepetitionScore dropped below threshold - false alarm
-                if repetition_score < self._recovery_threshold:
+                                    "Sustained rhythmic motion detected. Monitoring for recovery.")
+            elif seizure_score < self._recovery_threshold:
+                if self._quiet_started_at is None:
+                    self._quiet_started_at = now
+                if now - self._quiet_started_at >= 0.8:
                     self._transition(AgentStateName.NORMAL, 0.0, now)
-                    self._frames_above_threshold = 0
+                    self._reset_detection_windows()
+            else:
+                self._quiet_started_at = None
 
         elif self._state == AgentStateName.MONITORING_RECOVERY:
-            elapsed = now - (self._timer_start or now)
+            elapsed = self._monitoring_elapsed(now)
             
-            if repetition_score < self._recovery_threshold:
-                # Recovery detected
-                self._transition(AgentStateName.RECOVERED, repetition_score, now)
-                self._log_event("seizure_recovered", "recovered",
-                                f"Repetitive motion subsided after {elapsed:.1f}s.")
-            elif elapsed >= self._recovery_window:
-                # Recovery window expired - critical alert
-                self._transition(AgentStateName.CRITICAL_ALERT, self._confidence, now)
-                self._log_event(
-                    "seizure_no_recovery", "critical_alert",
-                    f"Seizure-like motion persists after {self._recovery_window:.0f}s. "
-                    "Subject may need immediate medical attention.",
-                    recommended_action="Call emergency services (911). Do not restrain the subject. Clear the area of hazards.",
-                    elapsed=elapsed,
-                )
+            if seizure_score < self._recovery_threshold:
+                if self._quiet_started_at is None:
+                    self._quiet_started_at = now
+                if now - self._quiet_started_at >= self._required_quiet_seconds:
+                    self._transition(AgentStateName.RECOVERED, seizure_score, now)
+                    self._log_event("seizure_recovered", "recovered",
+                                    f"Repetitive motion subsided after {elapsed:.1f}s.")
+            else:
+                self._quiet_started_at = None
+                self._confidence = max(self._confidence, seizure_score)
+                if elapsed >= self._recovery_window:
+                    self._transition(AgentStateName.CRITICAL_ALERT, self._confidence, now)
+                    self._log_event(
+                        "seizure_no_recovery", "critical_alert",
+                        f"Seizure-like motion persists after {self._recovery_window:.0f}s. "
+                        "Subject may need immediate medical attention.",
+                        recommended_action="Notify caregiver / emergency contact. Keep the area clear and do not restrain the subject.",
+                        elapsed=elapsed,
+                    )
 
         elif self._state == AgentStateName.RECOVERED:
             # Stay in recovered state briefly then return to normal
             if now - self._last_change > 3.0:
                 self._transition(AgentStateName.NORMAL, 0.0, now)
-                self._frames_above_threshold = 0
+                self._reset_detection_windows()
 
         elif self._state == AgentStateName.CRITICAL_ALERT:
             # Stay in alert until manually acknowledged or late recovery
-            if repetition_score < self._recovery_threshold:
-                self._transition(AgentStateName.RECOVERED, repetition_score, now)
-                self._log_event("seizure_late_recovery", "recovered",
-                                "Repetitive motion subsided after critical alert was raised.")
+            if seizure_score < self._recovery_threshold:
+                if self._quiet_started_at is None:
+                    self._quiet_started_at = now
+                if now - self._quiet_started_at >= self._required_quiet_seconds:
+                    self._transition(AgentStateName.RECOVERED, seizure_score, now)
+                    self._log_event("seizure_late_recovery", "recovered",
+                                    "Repetitive motion subsided after critical alert was raised.")
+            else:
+                self._quiet_started_at = None
 
         return self._build_state(now)
 
@@ -132,19 +171,89 @@ class SeizureAgent(BaseAgent):
         self._last_change = time.time()
         self._frames_since_suspicious = 0
         self._frames_above_threshold = 0
+        self._high_score_started_at = None
+        self._quiet_started_at = None
+        self._timer_pause_started = None
+        self._timer_paused_total = 0.0
+        self._score_ema = 0.0
+        self._last_seizure_score = 0.0
+        self._last_pose_quality = 0.0
+        self._last_pose_reliable = False
+        self._last_visibility_reason = "no_pose"
 
     def _transition(self, new_state: AgentStateName, confidence: float, now: float) -> None:
         """Transition to new state and update internal tracking."""
         self._state = new_state
         self._confidence = confidence
         self._last_change = now
+        if new_state in {AgentStateName.NORMAL, AgentStateName.RECOVERED, AgentStateName.CRITICAL_ALERT}:
+            self._timer_pause_started = None
+            self._timer_paused_total = 0.0
+
+    def _compute_seizure_confidence(self, f: PoseFeatures) -> float:
+        """Smooth and gate the rhythmic-motion score."""
+        raw_score = f.repetition_score
+        if f.visibility_reason != "ok":
+            raw_score *= 0.85
+        if f.pose_quality < 0.55:
+            raw_score *= 0.75
+        if f.motion_energy < 0.015 and raw_score < 0.80:
+            raw_score *= 0.65
+
+        alpha = 0.45 if raw_score >= self._score_ema else 0.65
+        self._score_ema = alpha * raw_score + (1.0 - alpha) * self._score_ema
+        self._last_seizure_score = max(raw_score, self._score_ema)
+
+        if self._last_seizure_score >= 0.35:
+            print(
+                "[DEBUG] SEIZURE_SCORE="
+                f"{self._last_seizure_score:.3f} | raw={raw_score:.3f}, "
+                f"rep={f.repetition_score:.3f}, motion={f.motion_energy:.3f}, "
+                f"pose={f.pose_quality:.2f}, reason={f.visibility_reason}"
+            )
+
+        return self._last_seizure_score
+
+    def _mark_pose_unusable(self, reason: str, quality: float, now: float) -> None:
+        self._last_pose_quality = quality
+        self._last_pose_reliable = False
+        self._last_visibility_reason = reason
+        self._last_seizure_score = 0.0
+        self._score_ema = 0.0
+        self._high_score_started_at = None
+        self._frames_above_threshold = 0
+
+        if self._state == AgentStateName.SUSPICIOUS_EVENT:
+            self._transition(AgentStateName.NORMAL, 0.0, now)
+        elif self._state == AgentStateName.MONITORING_RECOVERY and self._timer_pause_started is None:
+            self._timer_pause_started = now
+
+    def _resume_recovery_timer(self, now: float) -> None:
+        if self._timer_pause_started is None:
+            return
+        self._timer_paused_total += now - self._timer_pause_started
+        self._timer_pause_started = None
+
+    def _monitoring_elapsed(self, now: float) -> float:
+        if self._timer_start is None:
+            return 0.0
+        paused_total = self._timer_paused_total
+        if self._timer_pause_started is not None:
+            paused_total += now - self._timer_pause_started
+        return max(0.0, now - self._timer_start - paused_total)
+
+    def _reset_detection_windows(self) -> None:
+        self._frames_above_threshold = 0
+        self._frames_since_suspicious = 0
+        self._high_score_started_at = None
+        self._quiet_started_at = None
 
     def _build_state(self, now: float) -> AgentState:
         """Build AgentState object for current state."""
         timer_active = self._state == AgentStateName.MONITORING_RECOVERY
         timer_remaining = 0.0
         if timer_active and self._timer_start is not None:
-            elapsed = now - self._timer_start
+            elapsed = self._monitoring_elapsed(now)
             timer_remaining = max(0.0, self._recovery_window - elapsed)
 
         summaries = {
@@ -154,17 +263,36 @@ class SeizureAgent(BaseAgent):
             AgentStateName.RECOVERED: "Repetitive motion subsided. Returning to normal monitoring.",
             AgentStateName.CRITICAL_ALERT: "CRITICAL: Persistent seizure-like motion. Immediate medical attention required.",
         }
+        summary = summaries.get(self._state, "")
+        if not self._last_pose_reliable:
+            reason = self._last_visibility_reason.replace("_", " ")
+            if self._state == AgentStateName.MONITORING_RECOVERY:
+                summary = f"Pose unreliable ({reason}). Seizure recovery timer paused."
+            elif self._state in {AgentStateName.NORMAL, AgentStateName.SUSPICIOUS_EVENT}:
+                summary = f"Pose unreliable ({reason}). Waiting for stable body view."
+
+        display_confidence = (
+            self._confidence
+            if self._state != AgentStateName.NORMAL
+            else self._last_seizure_score
+        )
 
         return AgentState(
             agent_name=self.get_agent_name(),
             state=self._state,
-            confidence=round(self._confidence, 3),
+            confidence=round(display_confidence, 3),
             event_type="seizure_suspected" if self._state != AgentStateName.NORMAL else "none",
             timer_active=timer_active,
             timer_remaining=round(timer_remaining, 1),
             timer_total=self._recovery_window,
             last_change=datetime.fromtimestamp(self._last_change, tz=timezone.utc).isoformat(),
-            summary=summaries.get(self._state, ""),
+            summary=summary,
+            model_source="signal_processing",
+            model_status="jitter_filtered",
+            rule_confidence=round(self._last_seizure_score, 3),
+            pose_quality=round(self._last_pose_quality, 3),
+            pose_reliable=self._last_pose_reliable,
+            visibility_reason=self._last_visibility_reason,
         )
 
     def _log_event(

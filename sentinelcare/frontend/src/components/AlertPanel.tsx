@@ -1,6 +1,16 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { AlertData } from "@/hooks/useWebSocket";
+
+interface Hospital {
+  name: string;
+  address: string;
+  distance: number;
+  latitude: number;
+  longitude: number;
+  rating?: number;
+}
 
 interface AlertPanelProps {
   alert: AlertData | null;
@@ -8,6 +18,34 @@ interface AlertPanelProps {
 }
 
 export default function AlertPanel({ alert, onAcknowledge }: AlertPanelProps) {
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [loadingHospitals, setLoadingHospitals] = useState(false);
+  const [isMockData, setIsMockData] = useState(false);
+
+  useEffect(() => {
+    if (!alert) return;
+    setLoadingHospitals(true);
+    setHospitals([]);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const res = await fetch("/api/nearby-hospitals", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+          });
+          const data = await res.json();
+          setHospitals(data.hospitals || []);
+          setIsMockData(data.isMockData || false);
+        } catch { /* silently fail */ }
+        finally { setLoadingHospitals(false); }
+      },
+      () => setLoadingHospitals(false),
+      { timeout: 10000, maximumAge: 300000 }
+    );
+  }, [alert?.alert_id]);
+
   if (!alert) return null;
 
   const { event } = alert;
@@ -61,6 +99,42 @@ export default function AlertPanel({ alert, onAcknowledge }: AlertPanelProps) {
           <span className="text-[13px] text-red-300 font-medium">{event.recommended_action}</span>
         </div>
       )}
+
+      {/* Nearest Hospitals */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Nearest Hospitals</span>
+          {isMockData && <span className="text-[9px] text-slate-600 italic">demo data</span>}
+        </div>
+        {loadingHospitals ? (
+          <div className="space-y-1.5">
+            {[1,2,3].map(i => <div key={i} className="h-10 bg-slate-800/40 rounded-lg animate-pulse" />)}
+          </div>
+        ) : hospitals.length > 0 ? (
+          <div className="space-y-1.5">
+            {hospitals.map((h, i) => (
+              <a
+                key={i}
+                href={`https://www.google.com/maps/dir/?api=1&destination=${h.latitude},${h.longitude}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between bg-slate-800/40 hover:bg-slate-700/40 border border-slate-700/30 rounded-lg px-3 py-2 transition-colors"
+              >
+                <div className="min-w-0">
+                  <p className="text-[12px] text-slate-200 font-medium truncate">{h.name}</p>
+                  <p className="text-[10px] text-slate-500 truncate">{h.address}</p>
+                </div>
+                <div className="text-right flex-shrink-0 ml-2">
+                  <p className="text-[11px] text-cyan-400 font-mono">{h.distance} mi</p>
+                  {h.rating && <p className="text-[10px] text-slate-500">★ {h.rating}</p>}
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-500 italic">Unable to load hospitals. Call 911 immediately.</p>
+        )}
+      </div>
 
       {onAcknowledge && (
         <button

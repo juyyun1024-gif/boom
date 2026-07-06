@@ -1,6 +1,3 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import type { AgentState } from "@/hooks/useWebSocket";
 
 interface RecoveryTimerProps {
@@ -9,37 +6,23 @@ interface RecoveryTimerProps {
 
 export default function RecoveryTimer({ agentState }: RecoveryTimerProps) {
   const { timer_active, timer_remaining, timer_total } = agentState;
-  const [displayTime, setDisplayTime] = useState(timer_remaining);
-
-  useEffect(() => {
-    setDisplayTime(timer_remaining);
-  }, [timer_remaining]);
-
-  // Smooth countdown interpolation
-  useEffect(() => {
-    if (!timer_active) return;
-    const interval = setInterval(() => {
-      setDisplayTime((prev) => Math.max(0, prev - 0.1));
-    }, 100);
-    return () => clearInterval(interval);
-  }, [timer_active]);
 
   if (!timer_active && agentState.state !== "monitoring_recovery") {
     return null;
   }
 
-  const pct = timer_total > 0 ? (displayTime / timer_total) * 100 : 0;
+  const pct = timer_total > 0 ? (timer_remaining / timer_total) * 100 : 0;
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
   const strokeOffset = circumference * (1 - pct / 100);
-  const isUrgent = displayTime < timer_total * 0.3;
+  const isUrgent = timer_remaining < timer_total * 0.3;
 
-  const strokeColor = isUrgent ? "#ef4444" : displayTime < timer_total * 0.6 ? "#f59e0b" : "#10b981";
-  const glowColor = isUrgent ? "rgba(239,68,68,0.25)" : displayTime < timer_total * 0.6 ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.2)";
+  const strokeColor = isUrgent ? "#ef4444" : timer_remaining < timer_total * 0.6 ? "#f59e0b" : "#10b981";
+  const glowColor = isUrgent ? "rgba(239,68,68,0.25)" : timer_remaining < timer_total * 0.6 ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.2)";
 
   return (
     <div className={`glass-card p-5 flex flex-col items-center animate-slide-up ${isUrgent ? "timer-urgent border-red-500/30" : ""}`}>
-      <h3 className="section-label mb-4">Recovery Window</h3>
+      <h3 className="section-label mb-4">{agentState.agent_name} Recovery</h3>
 
       {/* Circular timer */}
       <div className="relative w-28 h-28 mb-3">
@@ -73,7 +56,7 @@ export default function RecoveryTimer({ agentState }: RecoveryTimerProps) {
             className="text-2xl font-bold font-mono tabular-nums leading-none"
             style={{ color: strokeColor }}
           >
-            {displayTime.toFixed(1)}
+            {timer_remaining.toFixed(1)}
           </span>
           <span className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">seconds</span>
         </div>
@@ -82,6 +65,8 @@ export default function RecoveryTimer({ agentState }: RecoveryTimerProps) {
       <p className={`text-[11px] text-center leading-relaxed ${isUrgent ? "text-red-400 font-medium" : "text-slate-500"}`}>
         {isUrgent
           ? "No recovery detected — escalating soon"
+          : agentState.agent_name === "Seizure"
+          ? "Monitoring for rhythmic motion to stop..."
           : "Monitoring for recovery movement..."}
       </p>
     </div>

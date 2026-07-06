@@ -22,7 +22,7 @@ from .orchestrator import AgentOrchestrator
 from .seizure_agent import SeizureAgent
 from .stroke_agent import StrokeAgent
 from .wandering_agent import WanderingAgent
-from .vision import PoseTracker, VideoCapture, frame_to_base64
+from .vision import PoseTracker, VideoCapture, assess_frame_obstruction, frame_to_base64
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sentinelcare")
@@ -34,6 +34,7 @@ logger = logging.getLogger("sentinelcare")
 config = AppConfig()
 connected_clients: Set[WebSocket] = set()
 _running = False
+_active_orchestrator: AgentOrchestrator | None = None
 
 # Emergency contact & location info (set by frontend via /alerts/config)
 _alert_contacts: list[dict] = []       # [{"name": ..., "email": ...}, ...]
@@ -191,6 +192,8 @@ async def stop_stream():
 @app.post("/agent/reset")
 async def reset_agent():
     """Reset all agents to NORMAL state (useful after critical alert)."""
+    if _active_orchestrator is not None:
+        _active_orchestrator.reset_all()
     return {"status": "all_agents_reset"}
 
 
@@ -260,7 +263,7 @@ async def _broadcast(data: dict) -> None:
 
 async def _vision_loop(ws: WebSocket) -> None:
     """Main processing loop: capture → pose → features → agent → send."""
-    global _running
+    global _running, _active_orchestrator
 
     capture = VideoCapture(config.video_source)
     if not capture.open():
@@ -278,11 +281,12 @@ async def _vision_loop(ws: WebSocket) -> None:
     
     def rebuild_orchestrator():
         """Rebuild orchestrator based on current config."""
+        global _active_orchestrator
         # Clear existing agents by creating new orchestrator
         orchestrator_ref[0] = AgentOrchestrator()
         
         # Register ResponseGuardAgent if enabled
-        if config.enabled_agents.get("Fall", True):
+        if config.enabled_agents.get("FallGuard", True):
             response_agent = ResponseGuardAgent(
                 recovery_window=config.recovery_window,
                 confidence_threshold=config.fall_confidence_threshold,
@@ -291,7 +295,7 @@ async def _vision_loop(ws: WebSocket) -> None:
                 use_trained_model=config.use_trained_model,
                 trained_model_path=config.trained_model_path,
             )
-            orchestrator_ref[0].register_agent("Fall", response_agent)
+            orchestrator_ref[0].register_agent("FallGuard", response_agent)
         
         # Register SeizureAgent if enabled
         if config.enabled_agents.get("Seizure", True):
@@ -313,7 +317,19 @@ async def _vision_loop(ws: WebSocket) -> None:
                 recovery_motion_threshold=config.stroke_config.recovery_motion_threshold,
             )
             orchestrator_ref[0].register_agent("Stroke", stroke_agent)
+
+        # Register WanderingAgent if enabled
+        if config.enabled_agents.get("Wandering", False):
+            wandering_agent = WanderingAgent(
+                recovery_window=config.wandering_config.recovery_window,
+                boundary_zone=config.wandering_config.boundary_zone,
+                exit_threshold=config.wandering_config.exit_threshold,
+                pacing_threshold=config.wandering_config.pacing_threshold,
+                pacing_window=config.wandering_config.pacing_window,
+            )
+            orchestrator_ref[0].register_agent("Wandering", wandering_agent)
         
+        _active_orchestrator = orchestrator_ref[0]
         logger.info(f"Orchestrator rebuilt with agents: {list(orchestrator_ref[0]._agents.keys())}")
     
     # Initial build
@@ -347,6 +363,7 @@ async def _vision_loop(ws: WebSocket) -> None:
                 continue
 
             # Process — returns list of PoseData (one per detected person)
+            camera_obstructed, obstruction_reason, frame_quality = assess_frame_obstruction(frame)
             annotated, all_poses = tracker.process_frame(frame, draw_overlay=config.show_pose_overlay)
 
             num_people = len(all_poses)
@@ -356,16 +373,25 @@ async def _vision_loop(ws: WebSocket) -> None:
             worst_features = PoseFeatures()
             worst_confidence = 0.0
 
-            for idx, pose in enumerate(all_poses):
-                if idx not in extractors:
-                    extractors[idx] = FeatureExtractor()
-                feats = extractors[idx].extract(pose)
+            if camera_obstructed:
+                for extractor in extractors.values():
+                    extractor.reset()
+                worst_features = PoseFeatures(
+                    pose_quality=frame_quality,
+                    pose_reliable=False,
+                    visibility_reason=obstruction_reason,
+                )
+            else:
+                for idx, pose in enumerate(all_poses):
+                    if idx not in extractors:
+                        extractors[idx] = FeatureExtractor()
+                    feats = extractors[idx].extract(pose)
 
-                # Compute a quick fall signal to pick the worst-case person
-                fall_signal = feats.velocity + feats.ground_proximity * 0.5
-                if fall_signal > worst_confidence or idx == 0:
-                    worst_confidence = fall_signal
-                    worst_features = feats
+                    # Compute a quick fall signal to pick the worst-case person
+                    fall_signal = feats.velocity + feats.ground_proximity * 0.5
+                    if fall_signal > worst_confidence or idx == 0:
+                        worst_confidence = fall_signal
+                        worst_features = feats
 
             # Clean up extractors for people no longer detected
             for idx in list(extractors.keys()):
@@ -377,7 +403,7 @@ async def _vision_loop(ws: WebSocket) -> None:
             
             # Add unavailable/disabled agents for UI display
             from .models import AgentState, AgentStateName
-            all_agent_names = ["Fall", "Seizure", "Stroke", "Wandering"]
+            all_agent_names = ["FallGuard", "Seizure", "Stroke", "Wandering"]
             registered_names = set(orchestrator_ref[0]._agents.keys())
             
             for agent_name in all_agent_names:
@@ -392,10 +418,10 @@ async def _vision_loop(ws: WebSocket) -> None:
                     )
                     agent_states.append(unavailable_agent)
             
-            # Get Fall state for backward compatibility
+            # Get FallGuard state for backward compatibility
             fall_state = None
             for state in agent_states:
-                if state.agent_name == "Fall":
+                if state.agent_name == "FallGuard":
                     fall_state = state
                     break
 
@@ -449,6 +475,7 @@ async def _vision_loop(ws: WebSocket) -> None:
         logger.exception(f"Vision loop error: {e}")
     finally:
         _running = False
+        _active_orchestrator = None
         tracker.close()
         capture.release()
         logger.info("Vision loop stopped")
@@ -456,7 +483,7 @@ async def _vision_loop(ws: WebSocket) -> None:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    global config, _running
+    global config, _running, _active_orchestrator
 
     await ws.accept()
     connected_clients.add(ws)
@@ -476,7 +503,8 @@ async def websocket_endpoint(ws: WebSocket):
 
                 if msg.get("type") == "reset_agent":
                     # Reset all agents via orchestrator
-                    orchestrator_ref[0].reset_all()
+                    if _active_orchestrator is not None:
+                        _active_orchestrator.reset_all()
                     logger.info("All agents reset requested via WebSocket")
                 elif msg.get("type") == "toggle_agent":
                     # Toggle agent on/off
@@ -507,6 +535,8 @@ async def websocket_endpoint(ws: WebSocket):
                 elif msg.get("type") == "update_config":
                     config = AppConfig(**msg.get("config", {}))
                     logger.info(f"Config updated: {config}")
+                    if hasattr(ws.state, 'rebuild_orchestrator'):
+                        ws.state.rebuild_orchestrator()
 
             except asyncio.TimeoutError:
                 pass

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import os
+import threading
+import time
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -190,6 +192,13 @@ class VideoCapture:
     def __init__(self, source: str = "0") -> None:
         self._source_str = source
         self._cap: Optional[cv2.VideoCapture] = None
+        self._threaded = False
+        self._reader_running = False
+        self._reader_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        self._latest_frame: Optional[np.ndarray] = None
+        self._latest_frame_id = 0
+        self._returned_frame_id = 0
 
     def open(self) -> bool:
         """Open the video source."""
@@ -201,16 +210,43 @@ class VideoCapture:
         self._cap = cv2.VideoCapture(src)
 
         if isinstance(src, int):
+            self._threaded = True
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             self._cap.set(cv2.CAP_PROP_FPS, 30)
 
-        return self._cap.isOpened()
+        opened = self._cap.isOpened()
+        if opened and self._threaded:
+            self._reader_running = True
+            self._reader_thread = threading.Thread(
+                target=self._reader_loop,
+                name="sentinelcare-camera-reader",
+                daemon=True,
+            )
+            self._reader_thread.start()
+
+        return opened
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
         """Read a single frame."""
         if self._cap is None or not self._cap.isOpened():
             return False, None
+
+        if self._threaded:
+            deadline = time.time() + 0.05
+            while time.time() < deadline:
+                with self._lock:
+                    has_new_frame = (
+                        self._latest_frame is not None
+                        and self._latest_frame_id != self._returned_frame_id
+                    )
+                    if has_new_frame:
+                        self._returned_frame_id = self._latest_frame_id
+                        return True, self._latest_frame.copy()
+                time.sleep(0.002)
+            return False, None
+
         ret, frame = self._cap.read()
         if not ret and isinstance(self._source_str, str) and not self._source_str.isdigit():
             self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -218,8 +254,31 @@ class VideoCapture:
         return ret, frame
 
     def release(self) -> None:
+        self._reader_running = False
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=0.5)
+        self._reader_thread = None
+
         if self._cap is not None:
             self._cap.release()
+        self._cap = None
+        self._latest_frame = None
+
+    def _reader_loop(self) -> None:
+        """Continuously drain webcam frames and keep only the newest one."""
+        while self._reader_running:
+            if self._cap is None or not self._cap.isOpened():
+                time.sleep(0.01)
+                continue
+
+            ret, frame = self._cap.read()
+            if not ret or frame is None:
+                time.sleep(0.005)
+                continue
+
+            with self._lock:
+                self._latest_frame = frame
+                self._latest_frame_id += 1
 
     @property
     def is_opened(self) -> bool:
@@ -231,3 +290,45 @@ def frame_to_base64(frame: np.ndarray, quality: int = 70) -> str:
     encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
     _, buffer = cv2.imencode(".jpg", frame, encode_params)
     return base64.b64encode(buffer).decode("utf-8")
+
+
+def assess_frame_obstruction(frame: np.ndarray) -> tuple[bool, str, float]:
+    """Detect lens-cover / unusable-camera frames before pose inference is trusted."""
+    if frame is None or frame.size == 0:
+        return True, "camera_obstructed", 0.0
+
+    small = cv2.resize(frame, (160, 120), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+
+    brightness = float(np.mean(gray)) / 255.0
+    contrast = float(np.std(gray)) / 255.0
+    color_std = float(np.mean(np.std(small.reshape(-1, 3), axis=0))) / 255.0
+    saturation = float(np.mean(hsv[:, :, 1])) / 255.0
+    laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    edge_density = float(np.mean(cv2.Canny(gray, 40, 120) > 0))
+
+    too_dark = brightness < 0.08
+    too_bright = brightness > 0.97
+    low_texture = laplacian_var < 18.0 and edge_density < 0.025
+    uniform_frame = contrast < 0.075 and color_std < 0.075
+    close_color_cover = saturation > 0.35 and color_std < 0.085 and edge_density < 0.035
+
+    score = 0.0
+    if too_dark or too_bright:
+        score += 0.55
+    if low_texture:
+        score += 0.25
+    if uniform_frame:
+        score += 0.25
+    if close_color_cover:
+        score += 0.25
+
+    obstructed = score >= 0.65 and (
+        too_dark or too_bright or low_texture or close_color_cover
+    )
+    frame_quality = 1.0 - max(0.0, min(1.0, score))
+
+    if obstructed:
+        return True, "camera_obstructed", round(frame_quality, 4)
+    return False, "ok", round(frame_quality, 4)

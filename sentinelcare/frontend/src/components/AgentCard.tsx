@@ -10,14 +10,22 @@ interface AgentCardProps {
 export default function AgentCard({ agentState, poseDetected }: AgentCardProps) {
   const confidencePct = Math.round(agentState.confidence * 100);
   const isAvailable = agentState.available !== false; // Default to true if not specified
+  const aiEnabled = agentState.ai_enabled === true;
+  const modelConfidencePct = Math.round((agentState.model_confidence ?? 0) * 100);
+  const ruleConfidencePct = Math.round((agentState.rule_confidence ?? 0) * 100);
+  const poseQualityPct = Math.round((agentState.pose_quality ?? 0) * 100);
+  const hasPoseQuality = agentState.pose_reliable !== undefined;
+  const poseReliable = !hasPoseQuality || agentState.pose_reliable === true;
+  const visibilityReason = agentState.visibility_reason ?? "unknown";
+  const poseDegraded = poseReliable && visibilityReason !== "ok" && visibilityReason !== "unknown";
+  const modelStatus = agentState.model_status ?? "rules";
 
   // Agent-specific configuration
   const agentConfig = {
-    Fall: {
-      title: "Fall Agent",
-      description: "Fall / Collapse Detection",
-      icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
-      iconFill: "M12 15.5l-3.5-3.1a2.4 2.4 0 0 1-.7-1.8c0-1.3 1.1-2.4 2.5-2.4.7 0 1.3.3 1.7.7.4-.4 1-.7 1.7-.7 1.4 0 2.5 1.1 2.5 2.4 0 .7-.3 1.3-.7 1.8L12 15.5z",
+    FallGuard: {
+      title: "AI FallGuard Agent",
+      description: "Pose-Sequence Fall Detection",
+      icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
       confidenceLabel: "Fall Confidence"
     },
     Seizure: {
@@ -43,7 +51,7 @@ export default function AgentCard({ agentState, poseDetected }: AgentCardProps) 
     }
   };
 
-  const config = agentConfig[agentState.agent_name as keyof typeof agentConfig] || agentConfig.Fall;
+  const config = agentConfig[agentState.agent_name as keyof typeof agentConfig] || agentConfig.FallGuard;
 
   // Confidence bar color
   const barColor =
@@ -113,13 +121,27 @@ export default function AgentCard({ agentState, poseDetected }: AgentCardProps) 
             <p className="text-[11px] text-slate-500 mt-0.5">{config.description}</p>
           </div>
         </div>
-        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap flex-shrink-0 ${
-          poseDetected
-            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
-            : "bg-slate-800/60 text-slate-500 border border-slate-700/30"
-        }`}>
-          {poseDetected ? "Active" : "No Subject"}
-        </span>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {aiEnabled && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">
+              AI
+            </span>
+          )}
+          <span
+            title={visibilityReason.replace(/_/g, " ")}
+            className={`text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${
+              !poseDetected
+                ? "bg-slate-800/60 text-slate-500 border border-slate-700/30"
+                : poseDegraded
+                ? "bg-amber-500/15 text-amber-300 border border-amber-500/20"
+                : poseReliable
+                ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                : "bg-rose-500/15 text-rose-300 border border-rose-500/20"
+            }`}
+          >
+            {!poseDetected ? "No Subject" : poseDegraded ? "Partial" : poseReliable ? "Active" : "Pose Poor"}
+          </span>
+        </div>
       </div>
 
       {/* Confidence bar */}
@@ -136,6 +158,29 @@ export default function AgentCard({ agentState, poseDetected }: AgentCardProps) 
         </div>
       </div>
 
+      {aiEnabled && (
+        <div className="mb-4 grid grid-cols-4 gap-2">
+          <div className="bg-cyan-500/[0.06] rounded-lg px-2.5 py-2 border border-cyan-500/10">
+            <span className="text-[9px] text-cyan-400/70 block font-medium uppercase tracking-wider">Model</span>
+            <span className="text-[12px] text-cyan-200 font-mono font-semibold mt-0.5 block">{modelConfidencePct}%</span>
+          </div>
+          <div className="bg-slate-800/40 rounded-lg px-2.5 py-2 border border-slate-700/20">
+            <span className="text-[9px] text-slate-500 block font-medium uppercase tracking-wider">Rules</span>
+            <span className="text-[12px] text-slate-300 font-mono font-semibold mt-0.5 block">{ruleConfidencePct}%</span>
+          </div>
+          <div className="bg-slate-800/40 rounded-lg px-2.5 py-2 border border-slate-700/20">
+            <span className="text-[9px] text-slate-500 block font-medium uppercase tracking-wider">Pose</span>
+            <span className="text-[12px] text-slate-300 font-mono font-semibold mt-0.5 block">{poseQualityPct}%</span>
+          </div>
+          <div className="bg-slate-800/40 rounded-lg px-2.5 py-2 border border-slate-700/20 min-w-0">
+            <span className="text-[9px] text-slate-500 block font-medium uppercase tracking-wider">Status</span>
+            <span className="text-[11px] text-slate-300 font-medium mt-0.5 block truncate" title={modelStatus}>
+              {modelStatus.replace(/_/g, " ")}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Meta grid */}
       <div className="grid grid-cols-2 gap-2">
         <div className="bg-slate-800/40 rounded-xl px-3 py-2 border border-slate-700/20">
@@ -149,6 +194,22 @@ export default function AgentCard({ agentState, poseDetected }: AgentCardProps) 
           <span className="text-[13px] text-slate-300 font-mono font-medium mt-0.5 block">{timeLabel}</span>
         </div>
       </div>
+
+      {/* Recovery timer */}
+      {agentState.timer_active && (
+        <div className="mt-2 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+          <div className="flex justify-between text-[11px] mb-1.5">
+            <span className="text-amber-400 font-medium">Recovery Window</span>
+            <span className="text-amber-300 font-mono font-semibold">{agentState.timer_remaining.toFixed(1)}s</span>
+          </div>
+          <div className="h-1.5 bg-amber-500/20 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-amber-500 rounded-full transition-all duration-500"
+              style={{ width: `${(agentState.timer_remaining / agentState.timer_total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -53,6 +53,10 @@ class PoseFeatures(BaseModel):
     asymmetry_score: float = 0.0   # For StrokeAgent
     body_centroid_x: float = 0.0   # For WanderingAgent
     is_horizontal: bool = False    # For ResponseGuard: True when body is horizontal
+    pose_quality: float = 0.0      # Reliability of full-body pose for fall detection
+    pose_reliable: bool = False
+    visibility_reason: str = "no_pose"
+    visible_keypoints: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +64,8 @@ class PoseFeatures(BaseModel):
 # ---------------------------------------------------------------------------
 
 class AgentState(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     agent_name: str = "Unknown"  # NEW: identifies which agent produced this state
     state: AgentStateName = AgentStateName.NORMAL
     confidence: float = 0.0
@@ -70,6 +76,14 @@ class AgentState(BaseModel):
     last_change: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     summary: str = "System operating normally."
     available: bool = True  # NEW: indicates if agent is currently active
+    ai_enabled: bool = False
+    model_source: str = "rules"
+    model_status: str = "not_configured"
+    model_confidence: float = 0.0
+    rule_confidence: float = 0.0
+    pose_quality: float = 0.0
+    pose_reliable: bool = False
+    visibility_reason: str = "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +93,7 @@ class AgentState(BaseModel):
 class Event(BaseModel):
     event_id: str = Field(default_factory=lambda: f"evt_{uuid.uuid4().hex[:8]}")
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    agent: str = "Fall"
+    agent: str = "FallGuard"
     event_type: str = "unknown"
     status: str = "unknown"
     confidence: float = 0.0
@@ -140,13 +154,13 @@ class AppConfig(BaseModel):
     use_ml_boost: bool = False  # DISABLED: ML boost was reducing confidence below threshold
     ml_weight: float = 0.3  # Weight given to ML predictions (0-1)
     
-    # Trained model (alternative to rule-based)
-    use_trained_model: bool = False  # Trained model has false positives, using rules
+    # AI-backed FallGuard model
+    use_trained_model: bool = True
     trained_model_path: str = "app/models/fall_detector.pkl"
     
     # Agent enable/disable flags
     enabled_agents: dict[str, bool] = {
-        "Fall": True,
+        "FallGuard": True,
         "Seizure": True,
         "Stroke": True,
         "Wandering": False,
@@ -172,4 +186,3 @@ class WSMessage(BaseModel):
     alert: Optional[Alert] = None
     pose_detected: bool = False
     num_people: int = 0
-

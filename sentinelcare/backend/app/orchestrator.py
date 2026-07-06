@@ -124,6 +124,14 @@ class AgentOrchestrator:
             state: Current agent state with CRITICAL_ALERT status
         """
         from .models import Event
+
+        latest_alert = event_store.get_latest_alert()
+        if (
+            latest_alert
+            and latest_alert.event.agent == agent_name
+            and latest_alert.event.status == "critical_alert"
+        ):
+            return
         
         # Create event from agent state
         event = Event(
