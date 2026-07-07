@@ -58,12 +58,40 @@ class AgentOrchestrator:
             List of AgentState objects, one per registered agent, in registration order
         """
         states = []
+        collapse_flow_active = False
         
         for name, agent in self._agents.items():
             try:
+                if name == "Seizure" and collapse_flow_active:
+                    agent.reset()
+                    state = AgentState(
+                        agent_name=name,
+                        state=AgentStateName.NORMAL,
+                        confidence=0.0,
+                        event_type="none",
+                        timer_active=False,
+                        summary="Seizure monitoring paused while collapse recovery is active.",
+                        model_source="signal_processing",
+                        model_status="paused_by_collapse_flow",
+                        pose_quality=features.pose_quality,
+                        pose_reliable=features.pose_reliable,
+                        visibility_reason=features.visibility_reason,
+                    )
+                    states.append(state)
+                    self._previous_states[name] = AgentStateName.NORMAL
+                    continue
+
                 # Update agent and get new state
                 state = agent.update(features, pose_detected)
                 states.append(state)
+
+                if name == "FallGuard":
+                    collapse_flow_active = state.state in {
+                        AgentStateName.SUSPICIOUS_EVENT,
+                        AgentStateName.MONITORING_RECOVERY,
+                        AgentStateName.RECOVERED,
+                        AgentStateName.CRITICAL_ALERT,
+                    }
                 
                 # Check for CRITICAL_ALERT transition
                 prev_state = self._previous_states.get(name, AgentStateName.NORMAL)

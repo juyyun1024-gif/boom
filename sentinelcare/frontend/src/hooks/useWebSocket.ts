@@ -23,6 +23,8 @@ export interface AgentState {
   pose_quality?: number;
   pose_reliable?: boolean;
   visibility_reason?: string;
+  recovery_gesture_score?: number;
+  recovery_gesture_detected?: boolean;
 }
 
 export interface PoseFeatures {
@@ -38,6 +40,8 @@ export interface PoseFeatures {
   pose_reliable?: boolean;
   visibility_reason?: string;
   visible_keypoints?: number;
+  recovery_gesture_score?: number;
+  recovery_gesture_detected?: boolean;
 }
 
 export interface EventData {
@@ -142,6 +146,8 @@ export function useWebSocket(url: string) {
 
         if (msg.alert) {
           setLatestAlert(msg.alert);
+        } else if (msg.agents && !msg.agents.some((agent) => agent.state === "critical_alert")) {
+          setLatestAlert(null);
         }
 
         // Handle agent toggle response

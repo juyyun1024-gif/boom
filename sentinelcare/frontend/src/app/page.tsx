@@ -6,11 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import LiveFeed from "@/components/LiveFeed";
 import StatusBadge from "@/components/StatusBadge";
-import AgentCard from "@/components/AgentCard";
+import HealthEventAgentCard from "@/components/HealthEventAgentCard";
 import RecoveryTimer from "@/components/RecoveryTimer";
 import AlertPanel from "@/components/AlertPanel";
 import EventLog from "@/components/EventLog";
-import FutureAgents from "@/components/FutureAgents";
 import ConsentModal from "@/components/ConsentModal";
 import PrivacyStatus from "@/components/PrivacyStatus";
 import SecurityStatus from "@/components/SecurityStatus";
@@ -22,6 +21,7 @@ import { useUserLocation } from "@/hooks/useUserLocation";
 import { useAlertDispatch } from "@/hooks/useAlertDispatch";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+const HEALTH_EVENT_AGENT_NAMES = ["FallGuard", "Seizure"];
 
 export default function Dashboard() {
   const router = useRouter();
@@ -30,7 +30,7 @@ export default function Dashboard() {
   const [consentChecked, setConsentChecked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [enabledAgents, setEnabledAgents] = useState<Set<string>>(
-    new Set(["FallGuard", "Seizure", "Stroke"])
+    new Set(HEALTH_EVENT_AGENT_NAMES)
   );
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyAlertInfo, setEmergencyAlertInfo] = useState<{
@@ -39,6 +39,7 @@ export default function Dashboard() {
     timestamp: Date;
   } | null>(null);
   const emergencyModalQueuedRef = useRef(false);
+  const recoveryCloseQueuedRef = useRef(false);
 
   const {
     connected,
@@ -121,7 +122,7 @@ export default function Dashboard() {
       agents.find((agent) => agent.state === "critical_alert") ??
       (agentState?.state === "critical_alert" ? agentState : null);
 
-    if (!(criticalAgent || latestAlert) || showEmergencyModal || emergencyModalQueuedRef.current) {
+    if (!criticalAgent || showEmergencyModal || emergencyModalQueuedRef.current) {
       return;
     }
 
@@ -148,6 +149,32 @@ export default function Dashboard() {
     };
   }, [agents, agentState, latestAlert, showEmergencyModal]);
 
+  // Close the emergency window when the backend confirms recovery.
+  useEffect(() => {
+    const hasCritical =
+      agents.some((agent) => agent.state === "critical_alert") ||
+      agentState.state === "critical_alert";
+    const hasRecovered =
+      agents.some((agent) => agent.state === "recovered") ||
+      agentState.state === "recovered";
+
+    if (!hasRecovered || hasCritical) {
+      recoveryCloseQueuedRef.current = false;
+      return;
+    }
+
+    if (recoveryCloseQueuedRef.current) return;
+    recoveryCloseQueuedRef.current = true;
+
+    const timeout = window.setTimeout(() => {
+      emergencyModalQueuedRef.current = false;
+      setShowEmergencyModal(false);
+      setEmergencyAlertInfo(null);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [agents, agentState]);
+
   const handleCloseEmergencyModal = () => {
     setShowEmergencyModal(false);
     setEmergencyAlertInfo(null);
@@ -168,34 +195,35 @@ export default function Dashboard() {
     setShowConsent(false);
   };
 
-  const toggleAgent = (agentName: string) => {
+  const toggleHealthEventAgent = () => {
+    const nextEnabled = !HEALTH_EVENT_AGENT_NAMES.some((agentName) => enabledAgents.has(agentName));
+
     setEnabledAgents((prev) => {
       const updated = new Set(prev);
-      const isCurrentlyEnabled = updated.has(agentName);
-      
-      if (isCurrentlyEnabled) {
-        updated.delete(agentName);
-      } else {
-        updated.add(agentName);
-      }
-      
-      // Send toggle to backend
-      sendMessage({
-        type: "toggle_agent",
-        agent: agentName,
-        enabled: !isCurrentlyEnabled,
+
+      HEALTH_EVENT_AGENT_NAMES.forEach((agentName) => {
+        if (nextEnabled) {
+          updated.add(agentName);
+        } else {
+          updated.delete(agentName);
+        }
+
+        sendMessage({
+          type: "toggle_agent",
+          agent: agentName,
+          enabled: nextEnabled,
+        });
       });
-      
+
       return updated;
     });
   };
 
   const resetAllAgents = () => {
-    const allAgents = ["FallGuard", "Seizure", "Stroke"];
-    setEnabledAgents(new Set(allAgents));
+    setEnabledAgents(new Set(HEALTH_EVENT_AGENT_NAMES));
     
     // Send enable message for each agent
-    allAgents.forEach(agentName => {
+    HEALTH_EVENT_AGENT_NAMES.forEach(agentName => {
       sendMessage({
         type: "toggle_agent",
         agent: agentName,
@@ -203,6 +231,8 @@ export default function Dashboard() {
       });
     });
   };
+
+  const healthEventEnabled = HEALTH_EVENT_AGENT_NAMES.some((agentName) => enabledAgents.has(agentName));
 
   // Show loading while checking auth
   if (isLoading) {
@@ -318,52 +348,46 @@ export default function Dashboard() {
           <RecoveryTimer agentState={agentState} />
           <AlertPanel alert={latestAlert} onAcknowledge={handleAcknowledge} />
           
-          {/* Multi-Agent Cards */}
+          {/* Health Event Agent */}
           <div className="space-y-3">
             <div className="flex items-center justify-between px-1">
-              <h3 className="text-sm font-semibold text-slate-300">Agent Modules</h3>
+              <h3 className="text-sm font-semibold text-slate-300">AI Agents</h3>
               <button
                 onClick={resetAllAgents}
                 className="text-[10px] px-2 py-1 rounded bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 hover:text-slate-300 transition-colors"
-                title="Enable all agents"
+                title="Reset health event monitoring"
               >
                 Reset
               </button>
             </div>
-            {agents.length > 0 ? (
-              agents.map((agent) => (
-                <div key={agent.agent_name} className={`space-y-1.5 transition-opacity ${
-                  enabledAgents.has(agent.agent_name) ? "opacity-100" : "opacity-50"
-                }`}>
-                  <div className="flex items-center justify-between px-1">
-                    <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">
-                      {enabledAgents.has(agent.agent_name) ? "Enabled" : "Disabled"}
-                    </span>
-                    <button
-                      onClick={() => toggleAgent(agent.agent_name)}
-                      className={`w-9 h-5 rounded-full transition-all flex items-center ${
-                        enabledAgents.has(agent.agent_name)
-                          ? "bg-emerald-500/30 border border-emerald-500/50"
-                          : "bg-slate-700/50 border border-slate-600/50"
-                      }`}
-                      title={`${enabledAgents.has(agent.agent_name) ? "Disable" : "Enable"} ${agent.agent_name}`}
-                    >
-                      <div
-                        className={`w-4 h-4 rounded-full bg-white transition-transform ${
-                          enabledAgents.has(agent.agent_name) ? "translate-x-4" : "translate-x-0.5"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  <AgentCard 
-                    agentState={agent} 
-                    poseDetected={poseDetected && enabledAgents.has(agent.agent_name)}
+            <div className={`space-y-1.5 transition-opacity ${healthEventEnabled ? "opacity-100" : "opacity-50"}`}>
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">
+                  {healthEventEnabled ? "Enabled" : "Disabled"}
+                </span>
+                <button
+                  onClick={toggleHealthEventAgent}
+                  className={`w-9 h-5 rounded-full transition-all flex items-center ${
+                    healthEventEnabled
+                      ? "bg-emerald-500/30 border border-emerald-500/50"
+                      : "bg-slate-700/50 border border-slate-600/50"
+                  }`}
+                  title={`${healthEventEnabled ? "Disable" : "Enable"} Health Event Agent`}
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                      healthEventEnabled ? "translate-x-4" : "translate-x-0.5"
+                    }`}
                   />
-                </div>
-              ))
-            ) : (
-              <FutureAgents />
-            )}
+                </button>
+              </div>
+              <HealthEventAgentCard
+                agents={agents}
+                fallbackState={agentState}
+                poseDetected={poseDetected && healthEventEnabled}
+                enabled={healthEventEnabled}
+              />
+            </div>
           </div>
         </div>
 

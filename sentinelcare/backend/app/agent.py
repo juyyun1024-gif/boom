@@ -42,6 +42,10 @@ class ResponseGuardAgent(BaseAgent):
         self._last_pose_quality = 0.0
         self._last_pose_reliable = False
         self._last_visibility_reason = "no_pose"
+        self._last_recovery_gesture_score = 0.0
+        self._recovery_gesture_started_at: float | None = None
+        self._recovery_gesture_confirmed_until = 0.0
+        self._recovery_gesture_required_seconds = 0.5
 
         # Baseline tracking
         self._baseline_centroid: float | None = None
@@ -93,6 +97,7 @@ class ResponseGuardAgent(BaseAgent):
         self._last_pose_quality = features.pose_quality
         self._last_pose_reliable = features.pose_reliable
         self._last_visibility_reason = features.visibility_reason
+        self._last_recovery_gesture_score = features.recovery_gesture_score
 
         if not features.pose_reliable:
             self._mark_pose_unreliable(features.visibility_reason, features.pose_quality, now)
@@ -145,8 +150,8 @@ class ResponseGuardAgent(BaseAgent):
                 self._transition(AgentStateName.NORMAL, 0.0, now)
 
         elif self._state == AgentStateName.MONITORING_RECOVERY:
-            recovery_score = self._compute_recovery_score(features)
             elapsed = self._monitoring_elapsed(now)
+            recovery_score = self._compute_recovery_score(features)
 
             if recovery_score >= 0.55:
                 self._transition(AgentStateName.RECOVERED, recovery_score, now)
@@ -198,6 +203,9 @@ class ResponseGuardAgent(BaseAgent):
         self._last_pose_quality = 0.0
         self._last_pose_reliable = False
         self._last_visibility_reason = "no_pose"
+        self._last_recovery_gesture_score = 0.0
+        self._recovery_gesture_started_at = None
+        self._recovery_gesture_confirmed_until = 0.0
         self._timer_pause_started = None
         self._timer_paused_total = 0.0
         if self._ai_fall_model:
@@ -206,6 +214,12 @@ class ResponseGuardAgent(BaseAgent):
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _recovery_gesture_confirmed(self, f: PoseFeatures, now: float) -> bool:
+        """Require a short sustained wave before treating it as explicit recovery."""
+        self._last_recovery_gesture_score = f.recovery_gesture_score
+        self._recovery_gesture_started_at = None
+        return False
 
     def _update_baseline(self, f: PoseFeatures) -> None:
         """Track baseline centroid height during normal state."""
@@ -376,6 +390,7 @@ class ResponseGuardAgent(BaseAgent):
         self._state = new_state
         self._confidence = confidence
         self._last_change = now
+        self._recovery_gesture_started_at = None
 
         if new_state in {AgentStateName.NORMAL, AgentStateName.RECOVERED, AgentStateName.CRITICAL_ALERT}:
             self._timer_pause_started = None
@@ -389,6 +404,8 @@ class ResponseGuardAgent(BaseAgent):
         self._high_confidence_frames = 0
         self._last_rule_confidence = 0.0
         self._last_ai_prediction = None
+        self._last_recovery_gesture_score = 0.0
+        self._recovery_gesture_started_at = None
 
         if self._ai_fall_model:
             self._ai_fall_model.reset()
@@ -479,6 +496,11 @@ class ResponseGuardAgent(BaseAgent):
             pose_quality=round(self._last_pose_quality, 3),
             pose_reliable=self._last_pose_reliable,
             visibility_reason=self._last_visibility_reason,
+            recovery_gesture_score=round(self._last_recovery_gesture_score, 3),
+            recovery_gesture_detected=(
+                self._recovery_gesture_started_at is not None
+                or now < self._recovery_gesture_confirmed_until
+            ),
         )
 
     def _log_event(

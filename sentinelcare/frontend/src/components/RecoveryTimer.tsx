@@ -22,7 +22,7 @@ export default function RecoveryTimer({ agentState }: RecoveryTimerProps) {
 
   return (
     <div className={`glass-card p-5 flex flex-col items-center animate-slide-up ${isUrgent ? "timer-urgent border-red-500/30" : ""}`}>
-      <h3 className="section-label mb-4">{agentState.agent_name} Recovery</h3>
+      <h3 className="section-label mb-4">Health Event Recovery</h3>
 
       {/* Circular timer */}
       <div className="relative w-28 h-28 mb-3">
@@ -64,10 +64,8 @@ export default function RecoveryTimer({ agentState }: RecoveryTimerProps) {
 
       <p className={`text-[11px] text-center leading-relaxed ${isUrgent ? "text-red-400 font-medium" : "text-slate-500"}`}>
         {isUrgent
-          ? "No recovery detected — escalating soon"
-          : agentState.agent_name === "Seizure"
-          ? "Monitoring for rhythmic motion to stop..."
-          : "Monitoring for recovery movement..."}
+          ? "No recovery detected - escalating soon"
+          : "Monitoring for recovery signals..."}
       </p>
     </div>
   );

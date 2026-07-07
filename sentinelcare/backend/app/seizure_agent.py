@@ -56,6 +56,10 @@ class SeizureAgent(BaseAgent):
         self._last_pose_quality = 0.0
         self._last_pose_reliable = False
         self._last_visibility_reason = "no_pose"
+        self._last_recovery_gesture_score = 0.0
+        self._recovery_gesture_started_at: float | None = None
+        self._recovery_gesture_confirmed_until = 0.0
+        self._recovery_gesture_required_seconds = 0.5
         self._required_high_seconds = 2.0
         self._confirm_seconds = 0.6
         self._required_quiet_seconds = 1.0
@@ -75,6 +79,7 @@ class SeizureAgent(BaseAgent):
         self._last_pose_quality = features.pose_quality
         self._last_pose_reliable = features.pose_reliable
         self._last_visibility_reason = features.visibility_reason
+        self._last_recovery_gesture_score = features.recovery_gesture_score
 
         if not features.pose_reliable:
             self._mark_pose_unusable(features.visibility_reason, features.pose_quality, now)
@@ -180,15 +185,25 @@ class SeizureAgent(BaseAgent):
         self._last_pose_quality = 0.0
         self._last_pose_reliable = False
         self._last_visibility_reason = "no_pose"
+        self._last_recovery_gesture_score = 0.0
+        self._recovery_gesture_started_at = None
+        self._recovery_gesture_confirmed_until = 0.0
 
     def _transition(self, new_state: AgentStateName, confidence: float, now: float) -> None:
         """Transition to new state and update internal tracking."""
         self._state = new_state
         self._confidence = confidence
         self._last_change = now
+        self._recovery_gesture_started_at = None
         if new_state in {AgentStateName.NORMAL, AgentStateName.RECOVERED, AgentStateName.CRITICAL_ALERT}:
             self._timer_pause_started = None
             self._timer_paused_total = 0.0
+
+    def _recovery_gesture_confirmed(self, f: PoseFeatures, now: float) -> bool:
+        """Require a short sustained wave before treating it as explicit recovery."""
+        self._last_recovery_gesture_score = f.recovery_gesture_score
+        self._recovery_gesture_started_at = None
+        return False
 
     def _compute_seizure_confidence(self, f: PoseFeatures) -> float:
         """Smooth and gate the rhythmic-motion score."""
@@ -218,6 +233,8 @@ class SeizureAgent(BaseAgent):
         self._last_pose_quality = quality
         self._last_pose_reliable = False
         self._last_visibility_reason = reason
+        self._last_recovery_gesture_score = 0.0
+        self._recovery_gesture_started_at = None
         self._last_seizure_score = 0.0
         self._score_ema = 0.0
         self._high_score_started_at = None
@@ -293,6 +310,11 @@ class SeizureAgent(BaseAgent):
             pose_quality=round(self._last_pose_quality, 3),
             pose_reliable=self._last_pose_reliable,
             visibility_reason=self._last_visibility_reason,
+            recovery_gesture_score=round(self._last_recovery_gesture_score, 3),
+            recovery_gesture_detected=(
+                self._recovery_gesture_started_at is not None
+                or now < self._recovery_gesture_confirmed_until
+            ),
         )
 
     def _log_event(

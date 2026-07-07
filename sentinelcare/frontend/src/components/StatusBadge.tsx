@@ -74,8 +74,29 @@ interface StatusBadgeProps {
   agentState: AgentState;
 }
 
+function getHealthEventSummary(agentState: AgentState): string {
+  if (agentState.pose_reliable === false) {
+    return "Pose or camera view is unreliable. Waiting for a stable body view.";
+  }
+
+  switch (agentState.state) {
+    case "critical_alert":
+      return "Critical health event. Immediate attention required.";
+    case "monitoring_recovery":
+      return "Possible health event detected. Monitoring for recovery.";
+    case "suspicious_event":
+      return "Possible health event pattern detected. Evaluating body motion and recovery signals.";
+    case "recovered":
+      return "Recovery detected. Returning to normal monitoring.";
+    case "normal":
+    default:
+      return "Health Event Agent is monitoring body motion, recovery status, and pose quality.";
+  }
+}
+
 export default function StatusBadge({ agentState }: StatusBadgeProps) {
   const cfg = STATE_CONFIG[agentState.state] || STATE_CONFIG.normal;
+  const summary = getHealthEventSummary(agentState);
 
   return (
     <div className={`glass-card p-4 ${cfg.bgTint} border ${cfg.borderColor} transition-all duration-500`}>
@@ -92,9 +113,7 @@ export default function StatusBadge({ agentState }: StatusBadgeProps) {
         </div>
       </div>
 
-      {agentState.summary && (
-        <p className="mt-2.5 text-[13px] text-slate-400 leading-relaxed pl-6">{agentState.summary}</p>
-      )}
+      <p className="mt-2.5 text-[13px] text-slate-400 leading-relaxed pl-6">{summary}</p>
     </div>
   );
 }

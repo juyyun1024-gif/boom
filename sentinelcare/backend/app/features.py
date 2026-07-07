@@ -37,6 +37,19 @@ FALL_GUARD_KEYPOINTS = [
 CORE_KEYPOINTS = [LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP]
 LOWER_BODY_KEYPOINTS = [LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE]
 VISIBILITY_THRESHOLD = 0.45
+JOINT_HISTORY_KEYPOINTS = [
+    LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW,
+    LEFT_WRIST, RIGHT_WRIST, LEFT_HIP, RIGHT_HIP,
+    LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE,
+]
+LEFT_WRIST_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(LEFT_WRIST)
+RIGHT_WRIST_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(RIGHT_WRIST)
+LEFT_SHOULDER_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(LEFT_SHOULDER)
+RIGHT_SHOULDER_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(RIGHT_SHOULDER)
+LEFT_ELBOW_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(LEFT_ELBOW)
+RIGHT_ELBOW_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(RIGHT_ELBOW)
+LEFT_HIP_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(LEFT_HIP)
+RIGHT_HIP_HISTORY_INDEX = JOINT_HISTORY_KEYPOINTS.index(RIGHT_HIP)
 
 
 class FeatureExtractor:
@@ -140,6 +153,7 @@ class FeatureExtractor:
         
         # RepetitionScore: autocorrelation of per-joint vertical displacement
         repetition_score = self._compute_repetition_score(lms) if pose_reliable else 0.0
+        recovery_gesture_score = 0.0
         
         # AsymmetryScore: left/right landmark Y-coordinate difference
         asymmetry_score = self._compute_asymmetry_score(lms)
@@ -161,6 +175,8 @@ class FeatureExtractor:
             pose_reliable=pose_reliable,
             visibility_reason=visibility_reason,
             visible_keypoints=visible_keypoints,
+            recovery_gesture_score=round(recovery_gesture_score, 4),
+            recovery_gesture_detected=False,
         )
 
     def get_rapid_drop(self, window: int = 5) -> float:
@@ -182,14 +198,8 @@ class FeatureExtractor:
 
     def _compute_repetition_score(self, lms: list) -> float:
         """Compute jitter-resistant rhythmic motion score for SeizureAgent."""
-        joint_indices = [
-            LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW,
-            LEFT_WRIST, RIGHT_WRIST, LEFT_HIP, RIGHT_HIP,
-            LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE,
-        ]
-
-        current_positions = [(lms[i].x, lms[i].y) for i in joint_indices if i < len(lms)]
-        current_visibility = [lms[i].visibility for i in joint_indices if i < len(lms)]
+        current_positions = [(lms[i].x, lms[i].y) for i in JOINT_HISTORY_KEYPOINTS if i < len(lms)]
+        current_visibility = [lms[i].visibility for i in JOINT_HISTORY_KEYPOINTS if i < len(lms)]
         self._joint_history.append(current_positions)
         self._joint_visibility_history.append(current_visibility)
 
@@ -238,6 +248,136 @@ class FeatureExtractor:
         active_joint_factor = self._clamp(len(joint_scores) / 3)
         score = (sum(top_scores) / len(top_scores)) * active_joint_factor
         return self._clamp(score)
+
+    def _compute_recovery_gesture_score(self) -> float:
+        """Detect an intentional wrist wave for dismissing an active recovery alert."""
+        if len(self._joint_history) < 14 or len(self._joint_visibility_history) < 14:
+            return 0.0
+
+        history = list(self._joint_history)[-36:]
+        visibility_history = list(self._joint_visibility_history)[-36:]
+        wrist_scores = [
+            self._single_wrist_wave_score(
+                history,
+                visibility_history,
+                LEFT_WRIST_HISTORY_INDEX,
+                LEFT_ELBOW_HISTORY_INDEX,
+                LEFT_SHOULDER_HISTORY_INDEX,
+                LEFT_HIP_HISTORY_INDEX,
+            ),
+            self._single_wrist_wave_score(
+                history,
+                visibility_history,
+                RIGHT_WRIST_HISTORY_INDEX,
+                RIGHT_ELBOW_HISTORY_INDEX,
+                RIGHT_SHOULDER_HISTORY_INDEX,
+                RIGHT_HIP_HISTORY_INDEX,
+            ),
+        ]
+        return max(wrist_scores)
+
+    def _single_wrist_wave_score(
+        self,
+        history: list[list[tuple[float, float]]],
+        visibility_history: list[list[float]],
+        wrist_index: int,
+        elbow_index: int,
+        shoulder_index: int,
+        hip_index: int,
+    ) -> float:
+        required_indices = [wrist_index, elbow_index, shoulder_index, hip_index]
+        usable = []
+        for frame, vis_frame in zip(history, visibility_history):
+            if not all(idx < len(frame) and idx < len(vis_frame) for idx in required_indices):
+                continue
+            usable.append(
+                {
+                    "wrist": frame[wrist_index],
+                    "elbow": frame[elbow_index],
+                    "shoulder": frame[shoulder_index],
+                    "hip": frame[hip_index],
+                    "wrist_visibility": vis_frame[wrist_index],
+                    "elbow_visibility": vis_frame[elbow_index],
+                    "shoulder_visibility": vis_frame[shoulder_index],
+                }
+            )
+        if len(usable) < 14:
+            return 0.0
+
+        visible = [
+            item
+            for item in usable
+            if item["wrist_visibility"] >= 0.45
+            and item["elbow_visibility"] >= 0.30
+            and item["shoulder_visibility"] >= 0.35
+        ]
+        if len(visible) < 12:
+            return 0.0
+
+        wrist_x_series = [item["wrist"][0] for item in visible]
+        y_series = [item["wrist"][1] for item in visible]
+        elbow_x_series = [item["elbow"][0] for item in visible]
+        shoulder_x_series = [item["shoulder"][0] for item in visible]
+        shoulder_y_series = [item["shoulder"][1] for item in visible]
+        hip_y_series = [item["hip"][1] for item in visible]
+
+        avg_wrist_y = sum(y_series) / len(y_series)
+        avg_shoulder_y = sum(shoulder_y_series) / len(shoulder_y_series)
+        avg_hip_y = sum(hip_y_series) / len(hip_y_series)
+
+        above_shoulder_score = self._clamp((avg_shoulder_y + 0.08 - avg_wrist_y) / 0.14)
+        above_hip_score = self._clamp((avg_hip_y - avg_wrist_y) / 0.22)
+        arm_context_score = max(0.20, above_shoulder_score, above_hip_score * 0.85)
+
+        anchor_x_series = [
+            elbow_x * 0.65 + shoulder_x * 0.35
+            for elbow_x, shoulder_x in zip(elbow_x_series, shoulder_x_series)
+        ]
+        relative_x_series = [
+            wrist_x - anchor_x
+            for wrist_x, anchor_x in zip(wrist_x_series, anchor_x_series)
+        ]
+
+        wrist_x_amplitude = max(wrist_x_series) - min(wrist_x_series)
+        relative_x_amplitude = max(relative_x_series) - min(relative_x_series)
+        y_amplitude = max(y_series) - min(y_series)
+        if max(wrist_x_amplitude, relative_x_amplitude) < 0.050:
+            return 0.0
+
+        per_frame_motion = self._average_deadband_motion(wrist_x_series, y_series, deadband=0.0025)
+        direction_score = self._wave_direction_score(relative_x_series)
+
+        lateral_score = self._clamp((wrist_x_amplitude - 0.045) / 0.10)
+        relative_score = self._clamp((relative_x_amplitude - 0.035) / 0.08)
+        motion_score = self._clamp((per_frame_motion - 0.003) / 0.016)
+        vertical_penalty = 1.0 if y_amplitude <= max(wrist_x_amplitude, relative_x_amplitude) * 1.8 else 0.70
+        visibility_score = self._clamp((len(visible) - 8) / 14)
+
+        return self._clamp(
+            (
+                0.30 * lateral_score
+                + 0.30 * relative_score
+                + 0.25 * direction_score
+                + 0.10 * motion_score
+                + 0.05 * arm_context_score
+            )
+            * vertical_penalty
+            * visibility_score
+        )
+
+    def _wave_direction_score(self, series: list[float], deadband: float = 0.006) -> float:
+        signs: list[int] = []
+        for idx in range(1, len(series)):
+            delta = series[idx] - series[idx - 1]
+            if abs(delta) <= deadband:
+                continue
+            signs.append(1 if delta > 0 else -1)
+
+        if len(signs) < 4:
+            return 0.0
+
+        changes = sum(1 for idx in range(1, len(signs)) if signs[idx] != signs[idx - 1])
+        return self._clamp((changes - 1) / 5)
 
     def _average_deadband_motion(
         self,

@@ -57,6 +57,8 @@ class PoseFeatures(BaseModel):
     pose_reliable: bool = False
     visibility_reason: str = "no_pose"
     visible_keypoints: int = 0
+    recovery_gesture_score: float = 0.0
+    recovery_gesture_detected: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +86,8 @@ class AgentState(BaseModel):
     pose_quality: float = 0.0
     pose_reliable: bool = False
     visibility_reason: str = "unknown"
+    recovery_gesture_score: float = 0.0
+    recovery_gesture_detected: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +166,7 @@ class AppConfig(BaseModel):
     enabled_agents: dict[str, bool] = {
         "FallGuard": True,
         "Seizure": True,
-        "Stroke": True,
+        "Stroke": False,
         "Wandering": False,
     }
     
