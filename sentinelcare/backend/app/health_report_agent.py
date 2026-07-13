@@ -25,7 +25,7 @@ class HealthReportAgent:
     def __init__(self) -> None:
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         self.model = os.getenv("HEALTH_REPORT_MODEL", "qwen2.5:7b")
-        self.timeout_seconds = float(os.getenv("HEALTH_REPORT_TIMEOUT", "5"))
+        self.timeout_seconds = float(os.getenv("HEALTH_REPORT_TIMEOUT", "180"))
         self.llm_enabled = (
             os.getenv("HEALTH_REPORT_LLM", "1").strip().lower() not in {"0", "false", "off"}
         )
@@ -77,6 +77,11 @@ class HealthReportAgent:
             llm_text = self._call_ollama(evidence)
         except Exception as exc:
             logger.warning("Local health report LLM unavailable, keeping structured report: %s", exc)
+            draft.source = "structured_fallback"
+            draft.model = self.model
+            draft.uncertainty.append(
+                f"Local Qwen report did not complete before timeout; structured fallback is shown."
+            )
             return draft
 
         if not llm_text:
@@ -196,22 +201,29 @@ class HealthReportAgent:
         )
 
     def _call_ollama(self, evidence: dict[str, Any]) -> str:
+        compact_evidence = {
+            "trigger": str(evidence["event_type"]).replace("_", " "),
+            "confidence_percent": round(float(evidence["confidence"]) * 100),
+            "location": evidence["location_label"],
+            "nearest_hospital": evidence["nearest_hospital"],
+            "signals": evidence["observed_signals"][:5],
+            "uncertainty": evidence["uncertainty"][:3],
+        }
         prompt = (
-            "You write concise emergency responder reports from camera monitoring evidence.\n"
-            "Do not diagnose. Do not invent symptoms, vitals, names, injuries, or treatments.\n"
-            "Use only the JSON evidence. Include uncertainty when pose or location quality is limited.\n"
-            "Write one clear responder report in 4 to 6 sentences. Mention trigger, confidence, "
-            "location, nearest hospital if present, and uncertainty.\n\n"
-            f"Evidence JSON:\n{json.dumps(evidence, sort_keys=True)}"
+            "Write a concise responder report in exactly 3 sentences. "
+            "Do not diagnose or invent details. Include trigger, confidence, location, "
+            "and uncertainty. Evidence JSON: "
+            f"{json.dumps(compact_evidence, sort_keys=True)}"
         )
 
         payload = {
             "model": self.model,
             "prompt": prompt,
-            "stream": False,
+            "stream": True,
+            "keep_alive": "10m",
             "options": {
                 "temperature": 0.2,
-                "num_predict": 320,
+                "num_predict": 120,
             },
         }
 
@@ -226,10 +238,19 @@ class HealthReportAgent:
 
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                chunks: list[str] = []
+                for line in resp:
+                    if not line.strip():
+                        continue
+
+                    data = json.loads(line.decode("utf-8"))
+                    response_part = data.get("response")
+                    if isinstance(response_part, str):
+                        chunks.append(response_part)
+                    if data.get("done"):
+                        break
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Ollama API error {exc.code}: {body[:300]}") from exc
 
-        response = data.get("response")
-        return response.strip() if isinstance(response, str) else ""
+        return "".join(chunks).strip()

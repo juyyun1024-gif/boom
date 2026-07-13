@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUserSettings } from '@/hooks/useUserSettings';
 import { useEmergencyContacts } from '@/hooks/useEmergencyContacts';
 import { useUserLocation } from '@/hooks/useUserLocation';
@@ -40,10 +40,21 @@ export default function EmergencyAlertModal({
   const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
   const [nearestHospital, setNearestHospital] = useState<Hospital | null>(null);
   const [loadingHospital, setLoadingHospital] = useState(false);
-  const reportSourceLabel =
-    healthReport?.source === 'structured'
-      ? 'Structured'
+  const countdownDeadlineRef = useRef<number | null>(null);
+  const dispatchStartedRef = useRef(false);
+  const handleDispatchRef = useRef<() => Promise<void>>(async () => {});
+  const reportIsStructuredDraft = healthReport?.source === 'structured';
+  const reportIsStructuredFallback = healthReport?.source === 'structured_fallback';
+  const reportSourceLabel = reportIsStructuredDraft
+    ? 'Generating Qwen'
+    : reportIsStructuredFallback
+      ? 'Qwen Timeout'
       : healthReport?.model || healthReport?.source || '';
+  const reportStatusText = reportIsStructuredDraft
+    ? 'Structured draft shown now. Local Qwen report will replace it when ready.'
+    : reportIsStructuredFallback
+      ? 'Qwen did not return before timeout, so the structured fallback is shown.'
+      : '';
 
   const handleDispatch = useCallback(async () => {
     if (isDispatched || dispatching) return;
@@ -78,6 +89,10 @@ export default function EmergencyAlertModal({
     onDispatched,
   ]);
 
+  useEffect(() => {
+    handleDispatchRef.current = handleDispatch;
+  }, [handleDispatch]);
+
   // Fetch nearest hospital on open when the option is checked
   useEffect(() => {
     if (!isOpen || !location?.latitude || !location?.longitude || !settings?.notify_nearest_hospital) {
@@ -102,29 +117,17 @@ export default function EmergencyAlertModal({
     };
   }, [isOpen, location, settings?.notify_nearest_hospital, fetchNearestHospital]);
 
-  // Countdown timer
-  useEffect(() => {
-    if (!isOpen || isCancelled || isDispatched) return;
-
-    if (countdown <= 0) {
-      const dispatchTimer = window.setTimeout(() => {
-        void handleDispatch();
-      }, 0);
-      return () => window.clearTimeout(dispatchTimer);
-    }
-
-    const timer = setTimeout(() => {
-      setCountdown(prev => prev - 1);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [isOpen, countdown, isCancelled, isDispatched, handleDispatch]);
-
   // Reset state when modal opens
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      countdownDeadlineRef.current = null;
+      dispatchStartedRef.current = false;
+      return;
+    }
 
     const timer = window.setTimeout(() => {
+      countdownDeadlineRef.current = Date.now() + COUNTDOWN_SECONDS * 1000;
+      dispatchStartedRef.current = false;
       setCountdown(COUNTDOWN_SECONDS);
       setIsCancelled(false);
       setIsDispatched(false);
@@ -133,7 +136,34 @@ export default function EmergencyAlertModal({
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [isOpen]);
+  }, [isOpen, alertTimestamp]);
+
+  // Countdown timer uses a fixed real-time deadline so report/settings updates cannot restart it.
+  useEffect(() => {
+    if (!isOpen || isCancelled || isDispatched) return;
+
+    if (!countdownDeadlineRef.current) {
+      countdownDeadlineRef.current = Date.now() + COUNTDOWN_SECONDS * 1000;
+    }
+
+    const tick = () => {
+      const deadline = countdownDeadlineRef.current ?? Date.now();
+      const remainingMs = Math.max(0, deadline - Date.now());
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+
+      setCountdown(remainingSeconds);
+
+      if (remainingMs <= 0 && !dispatchStartedRef.current) {
+        dispatchStartedRef.current = true;
+        void handleDispatchRef.current();
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 250);
+
+    return () => window.clearInterval(timer);
+  }, [isOpen, isCancelled, isDispatched]);
 
   const handleCancel = () => {
     setIsCancelled(true);
@@ -214,6 +244,9 @@ export default function EmergencyAlertModal({
                     </span>
                   </div>
                   <p className="text-sm text-slate-200 leading-relaxed">{healthReport.responder_report}</p>
+                  {reportStatusText && (
+                    <p className="mt-2 text-xs text-cyan-300/75">{reportStatusText}</p>
+                  )}
                   {healthReport.uncertainty.length > 0 && (
                     <div className="mt-3 space-y-1">
                       {healthReport.uncertainty.slice(0, 2).map((item) => (
@@ -308,6 +341,9 @@ export default function EmergencyAlertModal({
                     </span>
                   </div>
                   <p className="text-sm text-slate-200 leading-relaxed">{healthReport.responder_report}</p>
+                  {reportStatusText && (
+                    <p className="mt-2 text-xs text-cyan-300/75">{reportStatusText}</p>
+                  )}
                 </div>
               )}
 

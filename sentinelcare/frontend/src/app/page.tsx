@@ -156,6 +156,36 @@ export default function Dashboard() {
     };
   }, [agents, agentState, latestAlert, latestHealthReport, showEmergencyModal]);
 
+  // The backend sends a structured draft first, then upgrades it with the local LLM report.
+  useEffect(() => {
+    if (!showEmergencyModal || !latestHealthReport) return;
+
+    const timer = window.setTimeout(() => {
+      setEmergencyAlertInfo((current) => {
+        if (!current) return current;
+
+        const currentReport = current.healthReport;
+        const sameAlert =
+          !currentReport ||
+          !latestHealthReport.alert_id ||
+          currentReport.alert_id === latestHealthReport.alert_id;
+        const upgradesStructuredReport =
+          currentReport?.source === "structured" && latestHealthReport.source !== "structured";
+
+        if (!sameAlert || (!upgradesStructuredReport && currentReport)) {
+          return current;
+        }
+
+        return {
+          ...current,
+          healthReport: latestHealthReport,
+        };
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [latestHealthReport, showEmergencyModal]);
+
   const handleCloseEmergencyModal = () => {
     setShowEmergencyModal(false);
     setEmergencyAlertInfo(null);

@@ -180,7 +180,6 @@ export function useWebSocket(url: string) {
           setLatestHealthReport(msg.health_report);
         } else if (msg.agents && !msg.agents.some((agent) => agent.state === "critical_alert")) {
           setLatestAlert(null);
-          setLatestHealthReport(null);
         }
 
         // Handle agent toggle response
@@ -223,7 +222,6 @@ export function useWebSocket(url: string) {
       // Clear alert when reset_agent message is sent
       if (msg.type === "reset_agent") {
         setLatestAlert(null);
-        setLatestHealthReport(null);
       }
     }
   }, []);

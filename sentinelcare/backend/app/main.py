@@ -375,8 +375,10 @@ async def _vision_loop(ws: WebSocket) -> None:
                 alert.alert_id,
                 report.source,
             )
+            return alert
         except Exception as report_err:
             logger.error("Health event report generation failed: %s", report_err)
+            return None
 
     try:
         while _running:
@@ -524,9 +526,17 @@ async def _vision_loop(ws: WebSocket) -> None:
                 if task.done():
                     _llm_report_tasks.pop(alert_id, None)
                     try:
-                        task.result()
+                        completed_alert = task.result()
                     except Exception:
-                        pass
+                        completed_alert = None
+                    if completed_alert and (
+                        completed_alert.health_report or completed_alert.event.health_report
+                    ):
+                        msg.health_report = completed_alert.health_report or completed_alert.event.health_report
+                        if msg.alert is None:
+                            msg.alert = completed_alert
+                        if msg.type == "frame_update":
+                            msg.type = "health_report_update"
 
             await _broadcast(msg.model_dump())
 
