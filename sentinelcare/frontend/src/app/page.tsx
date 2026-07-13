@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useWebSocket } from "@/hooks/useWebSocket";
+import { useWebSocket, type HealthEventReport } from "@/hooks/useWebSocket";
 import LiveFeed from "@/components/LiveFeed";
 import StatusBadge from "@/components/StatusBadge";
 import HealthEventAgentCard from "@/components/HealthEventAgentCard";
@@ -37,9 +37,9 @@ export default function Dashboard() {
     type: string;
     severity: string;
     timestamp: Date;
+    healthReport: HealthEventReport | null;
   } | null>(null);
   const emergencyModalQueuedRef = useRef(false);
-  const recoveryCloseQueuedRef = useRef(false);
 
   const {
     connected,
@@ -48,6 +48,7 @@ export default function Dashboard() {
     agents,  // NEW: all agent states
     events,
     latestAlert,
+    latestHealthReport,
     poseDetected,
     numPeople,
     sendMessage,
@@ -131,6 +132,11 @@ export default function Dashboard() {
       criticalAgent?.event_type.replace(/_/g, " ") ??
       "Critical Medical Event";
     const timestamp = latestAlert ? new Date(latestAlert.triggered_at) : new Date();
+    const healthReport =
+      latestHealthReport ??
+      latestAlert?.health_report ??
+      latestAlert?.event.health_report ??
+      null;
 
     emergencyModalQueuedRef.current = true;
     const timeout = window.setTimeout(() => {
@@ -138,6 +144,7 @@ export default function Dashboard() {
         type: alertType,
         severity: "critical",
         timestamp,
+        healthReport,
       });
       setShowEmergencyModal(true);
       emergencyModalQueuedRef.current = false;
@@ -147,33 +154,7 @@ export default function Dashboard() {
       window.clearTimeout(timeout);
       emergencyModalQueuedRef.current = false;
     };
-  }, [agents, agentState, latestAlert, showEmergencyModal]);
-
-  // Close the emergency window when the backend confirms recovery.
-  useEffect(() => {
-    const hasCritical =
-      agents.some((agent) => agent.state === "critical_alert") ||
-      agentState.state === "critical_alert";
-    const hasRecovered =
-      agents.some((agent) => agent.state === "recovered") ||
-      agentState.state === "recovered";
-
-    if (!hasRecovered || hasCritical) {
-      recoveryCloseQueuedRef.current = false;
-      return;
-    }
-
-    if (recoveryCloseQueuedRef.current) return;
-    recoveryCloseQueuedRef.current = true;
-
-    const timeout = window.setTimeout(() => {
-      emergencyModalQueuedRef.current = false;
-      setShowEmergencyModal(false);
-      setEmergencyAlertInfo(null);
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, [agents, agentState]);
+  }, [agents, agentState, latestAlert, latestHealthReport, showEmergencyModal]);
 
   const handleCloseEmergencyModal = () => {
     setShowEmergencyModal(false);
@@ -263,6 +244,7 @@ export default function Dashboard() {
           alertType={emergencyAlertInfo.type}
           alertSeverity={emergencyAlertInfo.severity}
           alertTimestamp={emergencyAlertInfo.timestamp}
+          healthReport={emergencyAlertInfo.healthReport}
           onClose={handleCloseEmergencyModal}
           onDispatched={handleAcknowledge}
         />
@@ -346,7 +328,11 @@ export default function Dashboard() {
         <div className="lg:col-span-4 flex flex-col gap-4 min-h-0 overflow-y-auto pr-0.5">
           <StatusBadge agentState={agentState} />
           <RecoveryTimer agentState={agentState} />
-          <AlertPanel alert={latestAlert} onAcknowledge={handleAcknowledge} />
+          <AlertPanel
+            alert={latestAlert}
+            healthReport={latestHealthReport}
+            onAcknowledge={handleAcknowledge}
+          />
           
           {/* Health Event Agent */}
           <div className="space-y-3">

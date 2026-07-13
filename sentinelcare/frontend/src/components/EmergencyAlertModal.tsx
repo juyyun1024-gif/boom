@@ -4,13 +4,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { useUserSettings } from '@/hooks/useUserSettings';
 import { useEmergencyContacts } from '@/hooks/useEmergencyContacts';
 import { useUserLocation } from '@/hooks/useUserLocation';
-import { useAlertDispatch, Hospital } from '@/hooks/useAlertDispatch';
+import { useAlertDispatch } from '@/hooks/useAlertDispatch';
+import type { Hospital, DispatchResult } from '@/hooks/useAlertDispatch';
+import type { HealthEventReport } from '@/hooks/useWebSocket';
 
 interface EmergencyAlertModalProps {
   isOpen: boolean;
   alertType: string;
   alertSeverity: string;
   alertTimestamp: Date;
+  healthReport?: HealthEventReport | null;
   onClose: () => void;
   onDispatched?: () => void;
 }
@@ -22,6 +25,7 @@ export default function EmergencyAlertModal({
   alertType,
   alertSeverity,
   alertTimestamp,
+  healthReport,
   onClose,
   onDispatched,
 }: EmergencyAlertModalProps) {
@@ -33,47 +37,13 @@ export default function EmergencyAlertModal({
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [isCancelled, setIsCancelled] = useState(false);
   const [isDispatched, setIsDispatched] = useState(false);
-  const [dispatchResult, setDispatchResult] = useState<any>(null);
+  const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
   const [nearestHospital, setNearestHospital] = useState<Hospital | null>(null);
   const [loadingHospital, setLoadingHospital] = useState(false);
-
-  // Fetch nearest hospital on open when the option is checked
-  useEffect(() => {
-    if (isOpen && location?.latitude && location?.longitude && settings?.notify_nearest_hospital) {
-      setLoadingHospital(true);
-      fetchNearestHospital(Number(location.latitude), Number(location.longitude))
-        .then(setNearestHospital)
-        .finally(() => setLoadingHospital(false));
-    }
-  }, [isOpen, location, settings?.notify_nearest_hospital, fetchNearestHospital]);
-
-  // Countdown timer
-  useEffect(() => {
-    if (!isOpen || isCancelled || isDispatched) return;
-
-    if (countdown <= 0) {
-      handleDispatch();
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setCountdown(prev => prev - 1);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, countdown, isCancelled, isDispatched]);
-
-  // Reset state when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setCountdown(COUNTDOWN_SECONDS);
-      setIsCancelled(false);
-      setIsDispatched(false);
-      setDispatchResult(null);
-      setNearestHospital(null);
-    }
-  }, [isOpen]);
+  const reportSourceLabel =
+    healthReport?.source === 'structured'
+      ? 'Structured'
+      : healthReport?.model || healthReport?.source || '';
 
   const handleDispatch = useCallback(async () => {
     if (isDispatched || dispatching) return;
@@ -84,6 +54,7 @@ export default function EmergencyAlertModal({
         severity: alertSeverity,
         timestamp: alertTimestamp,
         location,
+        healthReport,
       },
       settings,
       contacts,
@@ -100,19 +71,73 @@ export default function EmergencyAlertModal({
     alertType,
     alertSeverity,
     alertTimestamp,
+    healthReport,
     settings,
     contacts,
     location,
     onDispatched,
   ]);
 
+  // Fetch nearest hospital on open when the option is checked
+  useEffect(() => {
+    if (!isOpen || !location?.latitude || !location?.longitude || !settings?.notify_nearest_hospital) {
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setLoadingHospital(true);
+      fetchNearestHospital(Number(location.latitude), Number(location.longitude))
+        .then((hospital) => {
+          if (active) setNearestHospital(hospital);
+        })
+        .finally(() => {
+          if (active) setLoadingHospital(false);
+        });
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [isOpen, location, settings?.notify_nearest_hospital, fetchNearestHospital]);
+
+  // Countdown timer
+  useEffect(() => {
+    if (!isOpen || isCancelled || isDispatched) return;
+
+    if (countdown <= 0) {
+      const dispatchTimer = window.setTimeout(() => {
+        void handleDispatch();
+      }, 0);
+      return () => window.clearTimeout(dispatchTimer);
+    }
+
+    const timer = setTimeout(() => {
+      setCountdown(prev => prev - 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [isOpen, countdown, isCancelled, isDispatched, handleDispatch]);
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const timer = window.setTimeout(() => {
+      setCountdown(COUNTDOWN_SECONDS);
+      setIsCancelled(false);
+      setIsDispatched(false);
+      setDispatchResult(null);
+      setNearestHospital(null);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isOpen]);
+
   const handleCancel = () => {
     setIsCancelled(true);
     onClose();
-  };
-
-  const handleImmediateDispatch = () => {
-    setCountdown(0);
   };
 
   if (!isOpen) return null;
@@ -179,6 +204,26 @@ export default function EmergencyAlertModal({
                 )}
               </div>
 
+              {/* Health Event Report */}
+              {healthReport && (
+                <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wide">Responder Report</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 uppercase">
+                      {reportSourceLabel}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-200 leading-relaxed">{healthReport.responder_report}</p>
+                  {healthReport.uncertainty.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {healthReport.uncertainty.slice(0, 2).map((item) => (
+                        <p key={item} className="text-xs text-amber-300/80">{item}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Nearest Hospital */}
               {settings?.notify_nearest_hospital && (
                 <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
@@ -228,19 +273,12 @@ export default function EmergencyAlertModal({
               </div>
 
               {/* Actions */}
-              <div className="flex gap-3 pt-4">
+              <div className="pt-4">
                 <button
                   onClick={handleCancel}
-                  className="flex-1 px-4 py-3 rounded-lg bg-slate-700 text-slate-200 font-medium hover:bg-slate-600 transition-colors"
+                  className="w-full px-4 py-3 rounded-lg bg-slate-700 text-slate-200 font-medium hover:bg-slate-600 transition-colors"
                 >
                   Cancel Alert
-                </button>
-                <button
-                  onClick={handleImmediateDispatch}
-                  disabled={dispatching}
-                  className="flex-1 px-4 py-3 rounded-lg bg-red-500 text-white font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
-                >
-                  {dispatching ? 'Dispatching...' : 'Send Now'}
                 </button>
               </div>
             </>
@@ -260,6 +298,18 @@ export default function EmergencyAlertModal({
                     : 'Alert has been logged.'}
                 </p>
               </div>
+
+              {healthReport && (
+                <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wide">Responder Report</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 uppercase">
+                      {reportSourceLabel}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-200 leading-relaxed">{healthReport.responder_report}</p>
+                </div>
+              )}
 
               {/* Dispatch Summary */}
               <div className="space-y-2 p-4 rounded-lg bg-slate-800/50 border border-slate-700">

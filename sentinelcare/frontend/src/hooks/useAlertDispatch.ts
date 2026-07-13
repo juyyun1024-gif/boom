@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { UserSettings } from './useUserSettings';
 import { EmergencyContact } from './useEmergencyContacts';
 import { UserLocation } from './useUserLocation';
+import type { HealthEventReport } from './useWebSocket';
 
 export interface Hospital {
   name: string;
@@ -18,6 +19,7 @@ interface AlertInfo {
   severity: string;
   timestamp: Date;
   location?: UserLocation | null;
+  healthReport?: HealthEventReport | null;
 }
 
 export interface DispatchResult {
@@ -56,6 +58,20 @@ function buildMailtoUrl(
   }
   if (location?.latitude && location?.longitude) {
     lines.push(`Map:         https://www.google.com/maps?q=${location.latitude},${location.longitude}`);
+  }
+
+  if (alertInfo.healthReport) {
+    lines.push('');
+    lines.push('HEALTH EVENT REPORT');
+    lines.push('================================');
+    lines.push(alertInfo.healthReport.responder_report);
+    if (alertInfo.healthReport.observed_signals.length > 0) {
+      lines.push('');
+      lines.push('Observed signals:');
+      alertInfo.healthReport.observed_signals.slice(0, 6).forEach((signal) => {
+        lines.push(`- ${signal}`);
+      });
+    }
   }
 
   if (hospital) {

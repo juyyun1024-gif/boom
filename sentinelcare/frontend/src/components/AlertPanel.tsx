@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AlertData } from "@/hooks/useWebSocket";
+import type { AlertData, HealthEventReport } from "@/hooks/useWebSocket";
 
 interface Hospital {
   name: string;
@@ -14,41 +14,60 @@ interface Hospital {
 
 interface AlertPanelProps {
   alert: AlertData | null;
+  healthReport?: HealthEventReport | null;
   onAcknowledge?: () => void;
 }
 
-export default function AlertPanel({ alert, onAcknowledge }: AlertPanelProps) {
+export default function AlertPanel({ alert, healthReport, onAcknowledge }: AlertPanelProps) {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loadingHospitals, setLoadingHospitals] = useState(false);
   const [isMockData, setIsMockData] = useState(false);
+  const alertId = alert?.alert_id;
 
   useEffect(() => {
-    if (!alert) return;
-    setLoadingHospitals(true);
-    setHospitals([]);
+    if (!alertId) return;
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const res = await fetch("/api/nearby-hospitals", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-          });
-          const data = await res.json();
-          setHospitals(data.hospitals || []);
-          setIsMockData(data.isMockData || false);
-        } catch { /* silently fail */ }
-        finally { setLoadingHospitals(false); }
-      },
-      () => setLoadingHospitals(false),
-      { timeout: 10000, maximumAge: 300000 }
-    );
-  }, [alert?.alert_id]);
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setLoadingHospitals(true);
+      setHospitals([]);
+
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          try {
+            const res = await fetch("/api/nearby-hospitals", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+            });
+            const data = await res.json();
+            if (!active) return;
+            setHospitals(data.hospitals || []);
+            setIsMockData(data.isMockData || false);
+          } catch { /* silently fail */ }
+          finally {
+            if (active) setLoadingHospitals(false);
+          }
+        },
+        () => {
+          if (active) setLoadingHospitals(false);
+        },
+        { timeout: 10000, maximumAge: 300000 }
+      );
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [alertId]);
 
   if (!alert) return null;
 
   const { event } = alert;
+  const report = healthReport ?? alert.health_report ?? event.health_report ?? null;
+  const reportSourceLabel =
+    report?.source === "structured" ? "Structured" : report?.model || report?.source || "";
   const ts = new Date(event.timestamp);
   const timeStr = ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
@@ -71,6 +90,18 @@ export default function AlertPanel({ alert, onAcknowledge }: AlertPanelProps) {
 
       {/* Summary */}
       <p className="text-[13px] text-slate-300 mb-3 leading-relaxed">{event.summary}</p>
+
+      {report && (
+        <div className="bg-cyan-500/[0.05] border border-cyan-500/15 rounded-xl px-3 py-2.5 mb-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span className="text-[10px] text-cyan-300/70 block uppercase tracking-wider">Responder Report</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 uppercase">
+              {reportSourceLabel}
+            </span>
+          </div>
+          <p className="text-[12px] text-slate-300 leading-relaxed">{report.responder_report}</p>
+        </div>
+      )}
 
       {/* Details grid */}
       <div className="grid grid-cols-2 gap-2 mb-3">

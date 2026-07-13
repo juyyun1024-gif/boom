@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -94,6 +94,26 @@ class AgentState(BaseModel):
 # Events & alerts
 # ---------------------------------------------------------------------------
 
+class HealthEventReport(BaseModel):
+    report_id: str = Field(default_factory=lambda: f"rpt_{uuid.uuid4().hex[:8]}")
+    generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    alert_id: str = ""
+    event_id: str = ""
+    source: str = "structured"
+    model: str = "none"
+    risk_level: str = "critical"
+    confidence: float = 0.0
+    location_label: str = ""
+    location: dict[str, Any] = Field(default_factory=dict)
+    nearest_hospital: Optional[dict[str, Any]] = None
+    summary: str = ""
+    responder_report: str = ""
+    observed_signals: list[str] = Field(default_factory=list)
+    timeline: list[str] = Field(default_factory=list)
+    uncertainty: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
 class Event(BaseModel):
     event_id: str = Field(default_factory=lambda: f"evt_{uuid.uuid4().hex[:8]}")
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -107,6 +127,7 @@ class Event(BaseModel):
     summary: str = ""
     recommended_action: str = ""
     video_source: str = "camera_0"
+    health_report: Optional[HealthEventReport] = None
 
 
 class Alert(BaseModel):
@@ -114,6 +135,7 @@ class Alert(BaseModel):
     event: Event
     triggered_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     acknowledged: bool = False
+    health_report: Optional[HealthEventReport] = None
 
 
 # ---------------------------------------------------------------------------
@@ -188,5 +210,6 @@ class WSMessage(BaseModel):
     features: Optional[PoseFeatures] = None
     event: Optional[Event] = None
     alert: Optional[Alert] = None
+    health_report: Optional[HealthEventReport] = None
     pose_detected: bool = False
     num_people: int = 0

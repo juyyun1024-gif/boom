@@ -17,6 +17,7 @@ from .agent import ResponseGuardAgent
 from .email_sender import send_alert_email
 from .event_store import event_store
 from .features import FeatureExtractor
+from .health_report_agent import HealthReportAgent
 from .models import AppConfig, WSMessage, AgentStateName, PoseFeatures
 from .orchestrator import AgentOrchestrator
 from .seizure_agent import SeizureAgent
@@ -230,6 +231,14 @@ def _send_alert_email_for_event(event) -> bool:
         logger.warning("No emergency contact emails configured — skipping auto-email.")
         return False
 
+    report = getattr(event, "health_report", None)
+    summary = report.responder_report if report else event.summary
+    recommended_action = (
+        " ".join(report.recommended_actions[:2])
+        if report and report.recommended_actions
+        else event.recommended_action
+    )
+
     return send_alert_email(
         to_emails=emails,
         alert_type=event.event_type.replace("_", " ").title(),
@@ -239,8 +248,8 @@ def _send_alert_email_for_event(event) -> bool:
         latitude=_alert_location.get("latitude"),
         longitude=_alert_location.get("longitude"),
         nearest_hospital=_alert_nearest_hospital,
-        summary=event.summary,
-        recommended_action=event.recommended_action,
+        summary=summary,
+        recommended_action=recommended_action,
     )
 
 
@@ -342,9 +351,32 @@ async def _vision_loop(ws: WebSocket) -> None:
     frame_count = 0
     last_event_count = len(event_store.get_events(limit=999))
     _email_sent_for_alert: str | None = None  # track alert_id to avoid duplicate emails
+    report_agent = HealthReportAgent()
+    _llm_report_attempted: set[str] = set()
+    _llm_report_tasks: dict[str, asyncio.Task] = {}
     target_interval = 1.0 / 24  # ~24 FPS target for streaming
 
     logger.info(f"Vision loop started — source: {config.video_source}")
+
+    async def enhance_report_with_llm(alert, states, feats, location, hospital) -> None:
+        try:
+            report = await asyncio.to_thread(
+                report_agent.generate_llm_report,
+                alert,
+                states,
+                feats,
+                location,
+                hospital,
+            )
+            alert.health_report = report
+            alert.event.health_report = report
+            logger.info(
+                "Health event report generated for %s using %s",
+                alert.alert_id,
+                report.source,
+            )
+        except Exception as report_err:
+            logger.error("Health event report generation failed: %s", report_err)
 
     try:
         while _running:
@@ -450,7 +482,31 @@ async def _vision_loop(ws: WebSocket) -> None:
             if critical_alert_detected:
                 latest = event_store.get_latest_alert()
                 if latest:
+                    if latest.health_report is None and latest.event.health_report is None:
+                        draft_report = report_agent.generate_draft_report(
+                            latest,
+                            agent_states,
+                            worst_features,
+                            _alert_location,
+                            _alert_nearest_hospital,
+                        )
+                        latest.health_report = draft_report
+                        latest.event.health_report = draft_report
+
+                    if report_agent.llm_enabled and latest.alert_id not in _llm_report_attempted:
+                        _llm_report_attempted.add(latest.alert_id)
+                        _llm_report_tasks[latest.alert_id] = asyncio.create_task(
+                            enhance_report_with_llm(
+                                latest,
+                                [state.model_copy(deep=True) for state in agent_states],
+                                worst_features.model_copy(deep=True),
+                                dict(_alert_location),
+                                dict(_alert_nearest_hospital) if _alert_nearest_hospital else None,
+                            )
+                        )
+
                     msg.alert = latest
+                    msg.health_report = latest.health_report or latest.event.health_report
                     msg.type = "critical_alert"
 
                     # Auto-send email (once per alert)
@@ -464,6 +520,14 @@ async def _vision_loop(ws: WebSocket) -> None:
                 # Reset email flag when no longer in critical state
                 _email_sent_for_alert = None
 
+            for alert_id, task in list(_llm_report_tasks.items()):
+                if task.done():
+                    _llm_report_tasks.pop(alert_id, None)
+                    try:
+                        task.result()
+                    except Exception:
+                        pass
+
             await _broadcast(msg.model_dump())
 
             # Pace the loop
@@ -476,6 +540,9 @@ async def _vision_loop(ws: WebSocket) -> None:
     finally:
         _running = False
         _active_orchestrator = None
+        for task in _llm_report_tasks.values():
+            if not task.done():
+                task.cancel()
         tracker.close()
         capture.release()
         logger.info("Vision loop stopped")

@@ -44,6 +44,26 @@ export interface PoseFeatures {
   recovery_gesture_detected?: boolean;
 }
 
+export interface HealthEventReport {
+  report_id: string;
+  generated_at: string;
+  alert_id: string;
+  event_id: string;
+  source: "structured" | "llm" | string;
+  model: string;
+  risk_level: string;
+  confidence: number;
+  location_label: string;
+  location: Record<string, unknown>;
+  nearest_hospital?: Record<string, unknown> | null;
+  summary: string;
+  responder_report: string;
+  observed_signals: string[];
+  timeline: string[];
+  uncertainty: string[];
+  recommended_actions: string[];
+}
+
 export interface EventData {
   event_id: string;
   timestamp: string;
@@ -57,6 +77,7 @@ export interface EventData {
   summary: string;
   recommended_action: string;
   video_source: string;
+  health_report?: HealthEventReport | null;
 }
 
 export interface AlertData {
@@ -64,6 +85,7 @@ export interface AlertData {
   event: EventData;
   triggered_at: string;
   acknowledged: boolean;
+  health_report?: HealthEventReport | null;
 }
 
 export interface WSMessage {
@@ -74,6 +96,7 @@ export interface WSMessage {
   features?: PoseFeatures;
   event?: EventData;
   alert?: AlertData;
+  health_report?: HealthEventReport | null;
   pose_detected?: boolean;
   num_people?: number;
   agent?: string;
@@ -104,6 +127,7 @@ export function useWebSocket(url: string) {
   const [features, setFeatures] = useState<PoseFeatures | null>(null);
   const [events, setEvents] = useState<EventData[]>([]);
   const [latestAlert, setLatestAlert] = useState<AlertData | null>(null);
+  const [latestHealthReport, setLatestHealthReport] = useState<HealthEventReport | null>(null);
   const [poseDetected, setPoseDetected] = useState(false);
   const [numPeople, setNumPeople] = useState(0);
 
@@ -146,8 +170,17 @@ export function useWebSocket(url: string) {
 
         if (msg.alert) {
           setLatestAlert(msg.alert);
+          setLatestHealthReport(
+            msg.health_report ??
+            msg.alert.health_report ??
+            msg.alert.event.health_report ??
+            null
+          );
+        } else if (msg.health_report) {
+          setLatestHealthReport(msg.health_report);
         } else if (msg.agents && !msg.agents.some((agent) => agent.state === "critical_alert")) {
           setLatestAlert(null);
+          setLatestHealthReport(null);
         }
 
         // Handle agent toggle response
@@ -190,6 +223,7 @@ export function useWebSocket(url: string) {
       // Clear alert when reset_agent message is sent
       if (msg.type === "reset_agent") {
         setLatestAlert(null);
+        setLatestHealthReport(null);
       }
     }
   }, []);
@@ -202,6 +236,7 @@ export function useWebSocket(url: string) {
     features,
     events,
     latestAlert,
+    latestHealthReport,
     poseDetected,
     numPeople,
     sendMessage,
