@@ -19,18 +19,24 @@ export default function ConsentModal({ userId, onConsentGiven }: ConsentModalPro
     const supabase = createClient();
     
     try {
-      const { error } = await supabase.from("user_consent").insert({
+      const { error } = await supabase.from("user_consent").upsert({
         user_id: userId,
         consent_given: true,
         consent_timestamp: new Date().toISOString(),
         user_agent: navigator.userAgent,
-      });
+      }, { onConflict: "user_id" });
       
-      if (error) throw error;
+      if (error) {
+        console.error("Failed to save consent to DB:", error);
+      }
+      
+      // Always store consent locally so it persists across logins on this device
+      localStorage.setItem(`consent_given_${userId}`, "true");
       onConsentGiven();
     } catch (error) {
       console.error("Failed to save consent:", error);
-      // Still allow access for demo purposes
+      // Still allow access and store locally
+      localStorage.setItem(`consent_given_${userId}`, "true");
       onConsentGiven();
     } finally {
       setIsSubmitting(false);

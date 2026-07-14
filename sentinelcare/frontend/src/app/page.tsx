@@ -99,14 +99,26 @@ export default function Dashboard() {
 
       setUser({ id: user.id, email: user.email });
 
-      // Check if user has given consent
+      // Check localStorage first (fast path — set when user clicks "Enable Monitoring")
+      const localConsent = localStorage.getItem(`consent_given_${user.id}`);
+      if (localConsent === "true") {
+        // Already consented on this device, no need to query DB
+        setConsentChecked(true);
+        setIsLoading(false);
+        return;
+      }
+
+      // Check if user has given consent in the DB
       const { data: consent } = await supabase
         .from("user_consent")
         .select("consent_given")
         .eq("user_id", user.id)
         .single();
 
-      if (!consent?.consent_given) {
+      if (consent?.consent_given) {
+        // Cache it locally for future logins
+        localStorage.setItem(`consent_given_${user.id}`, "true");
+      } else {
         setShowConsent(true);
       }
 

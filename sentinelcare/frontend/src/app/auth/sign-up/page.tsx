@@ -31,7 +31,7 @@ export default function SignUpPage() {
     setIsLoading(true);
 
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -40,7 +40,16 @@ export default function SignUpPage() {
             `${window.location.origin}/auth/callback`,
         },
       });
+
+      // If we got a user back, the account was created (even if email confirmation is pending)
+      if (data?.user) {
+        router.push("/auth/sign-up-success");
+        return;
+      }
+
+      // Only show error if the account was NOT created at all
       if (error) throw error;
+
       router.push("/auth/sign-up-success");
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
