@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel as PydanticBaseModel
 
 from .agent import ResponseGuardAgent
-from .email_sender import send_alert_email
+from . import email_sender
+from .email_sender import email_config, send_alert_email
 from .event_store import event_store
 from .features import FeatureExtractor
 from .health_report_agent import HealthReportAgent
@@ -41,6 +42,7 @@ _active_orchestrator: AgentOrchestrator | None = None
 _alert_contacts: list[dict] = []       # [{"name": ..., "email": ...}, ...]
 _alert_location: dict = {}             # {"address": ..., "latitude": ..., "longitude": ...}
 _alert_nearest_hospital: dict | None = None
+_sent_email_alert_ids: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +210,18 @@ class AlertContactsPayload(PydanticBaseModel):
     nearest_hospital: dict | None = None  # {"name": "...", "address": "...", "phone": "...", "distance": ...}
 
 
+class AlertEmailPayload(PydanticBaseModel):
+    alert_id: str | None = None
+    contacts: list[dict] = []
+    alert_type: str
+    severity: str = "critical"
+    timestamp: str
+    location: dict = {}
+    nearest_hospital: dict | None = None
+    summary: str = ""
+    recommended_action: str = ""
+
+
 @app.post("/alerts/config")
 async def set_alert_config(payload: AlertContactsPayload):
     """Store emergency contacts and location so the backend can send emails on alert."""
@@ -223,13 +237,83 @@ async def set_alert_config(payload: AlertContactsPayload):
     return {"status": "updated", "contacts": len(_alert_contacts)}
 
 
-def _send_alert_email_for_event(event) -> bool:
-    """Send alert email using stored contacts/location. Called from vision loop."""
-    emails = [c["email"] for c in _alert_contacts if c.get("email")]
-    logger.info(f"Auto-email: {len(_alert_contacts)} contacts stored, {len(emails)} with email addresses")
+def _send_alert_email_payload(
+    *,
+    alert_id: str | None,
+    contacts: list[dict],
+    alert_type: str,
+    severity: str,
+    timestamp: str,
+    location: dict,
+    nearest_hospital: dict | None,
+    summary: str,
+    recommended_action: str,
+) -> dict:
+    """Send alert email using backend SMTP, with alert-id deduplication."""
+    emails = [c["email"] for c in contacts if c.get("email")]
+    logger.info(f"Auto-email: {len(contacts)} contacts stored, {len(emails)} with email addresses")
+
+    if alert_id and alert_id in _sent_email_alert_ids:
+        return {
+            "sent": True,
+            "status": "already_sent",
+            "recipients": len(emails),
+            "smtp_configured": email_config.is_configured,
+            "message": "Email already sent for this alert.",
+        }
+
     if not emails:
         logger.warning("No emergency contact emails configured — skipping auto-email.")
-        return False
+        return {
+            "sent": False,
+            "status": "no_recipients",
+            "recipients": 0,
+            "smtp_configured": email_config.is_configured,
+            "message": "No emergency contact emails configured.",
+        }
+
+    if not email_config.is_configured:
+        logger.warning("SMTP not configured — skipping emergency contact email.")
+        return {
+            "sent": False,
+            "status": "smtp_not_configured",
+            "recipients": len(emails),
+            "smtp_configured": False,
+            "message": "SMTP is not configured on the backend.",
+        }
+
+    sent = send_alert_email(
+        to_emails=emails,
+        alert_type=alert_type,
+        severity=severity,
+        timestamp=timestamp,
+        location=location.get("address", ""),
+        latitude=location.get("latitude"),
+        longitude=location.get("longitude"),
+        nearest_hospital=nearest_hospital,
+        summary=summary,
+        recommended_action=recommended_action,
+    )
+
+    if sent and alert_id:
+        _sent_email_alert_ids.add(alert_id)
+
+    return {
+        "sent": sent,
+        "status": "sent" if sent else "failed",
+        "recipients": len(emails),
+        "smtp_configured": email_config.is_configured,
+        "message": (
+            "Emergency contact email sent."
+            if sent
+            else f"SMTP send failed: {email_sender.last_email_error or 'unknown error'}"
+        ),
+    }
+
+
+def _send_alert_email_for_alert(alert) -> dict:
+    """Send alert email using stored contacts/location. Called from vision loop."""
+    event = alert.event
 
     report = getattr(event, "health_report", None)
     summary = report.responder_report if report else event.summary
@@ -239,18 +323,38 @@ def _send_alert_email_for_event(event) -> bool:
         else event.recommended_action
     )
 
-    return send_alert_email(
-        to_emails=emails,
+    return _send_alert_email_payload(
+        alert_id=alert.alert_id,
+        contacts=_alert_contacts,
         alert_type=event.event_type.replace("_", " ").title(),
         severity="critical",
         timestamp=event.timestamp,
-        location=_alert_location.get("address", ""),
-        latitude=_alert_location.get("latitude"),
-        longitude=_alert_location.get("longitude"),
+        location=_alert_location,
         nearest_hospital=_alert_nearest_hospital,
         summary=summary,
         recommended_action=recommended_action,
     )
+
+
+@app.post("/alerts/dispatch-email")
+async def dispatch_alert_email(payload: AlertEmailPayload):
+    """Send emergency-contact email from the backend.
+
+    This endpoint is used by the frontend countdown dispatch. It does not call
+    911 and does not contact hospitals.
+    """
+    result = _send_alert_email_payload(
+        alert_id=payload.alert_id,
+        contacts=payload.contacts,
+        alert_type=payload.alert_type,
+        severity=payload.severity,
+        timestamp=payload.timestamp,
+        location=payload.location,
+        nearest_hospital=payload.nearest_hospital,
+        summary=payload.summary,
+        recommended_action=payload.recommended_action,
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +454,6 @@ async def _vision_loop(ws: WebSocket) -> None:
     _running = True
     frame_count = 0
     last_event_count = len(event_store.get_events(limit=999))
-    _email_sent_for_alert: str | None = None  # track alert_id to avoid duplicate emails
     report_agent = HealthReportAgent()
     _llm_report_attempted: set[str] = set()
     _llm_report_tasks: dict[str, asyncio.Task] = {}
@@ -510,17 +613,8 @@ async def _vision_loop(ws: WebSocket) -> None:
                     msg.alert = latest
                     msg.health_report = latest.health_report or latest.event.health_report
                     msg.type = "critical_alert"
-
-                    # Auto-send email (once per alert)
-                    if latest.alert_id != _email_sent_for_alert:
-                        _email_sent_for_alert = latest.alert_id
-                        try:
-                            _send_alert_email_for_event(latest.event)
-                        except Exception as email_err:
-                            logger.error(f"Auto-email failed: {email_err}")
-            else:
-                # Reset email flag when no longer in critical state
-                _email_sent_for_alert = None
+                    # Email dispatch is triggered by the frontend countdown via
+                    # /alerts/dispatch-email, so Cancel Alert can still stop it.
 
             for alert_id, task in list(_llm_report_tasks.items()):
                 if task.done():

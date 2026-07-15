@@ -7,6 +7,14 @@ interface AgentCardProps {
   poseDetected: boolean;
 }
 
+interface AgentCardConfig {
+  title: string;
+  description: string;
+  icon: string;
+  iconFill?: string;
+  confidenceLabel: string;
+}
+
 export default function AgentCard({ agentState, poseDetected }: AgentCardProps) {
   const confidencePct = Math.round(agentState.confidence * 100);
   const isAvailable = agentState.available !== false; // Default to true if not specified
@@ -21,7 +29,7 @@ export default function AgentCard({ agentState, poseDetected }: AgentCardProps) 
   const modelStatus = agentState.model_status ?? "rules";
 
   // Agent-specific configuration
-  const agentConfig = {
+  const agentConfig: Record<string, AgentCardConfig> = {
     FallGuard: {
       title: "AI FallGuard Agent",
       description: "Pose-Sequence Fall Detection",

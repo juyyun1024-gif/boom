@@ -24,7 +24,7 @@ function scorePct(value: number | undefined): number {
 }
 
 function maxScorePct(values: Array<number | undefined>): number {
-  return values.reduce((max, value) => Math.max(max, scorePct(value)), 0);
+  return values.reduce<number>((max, value) => Math.max(max, scorePct(value)), 0);
 }
 
 function stateRiskPct(agent: AgentState): number {

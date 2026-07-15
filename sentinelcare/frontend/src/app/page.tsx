@@ -73,7 +73,7 @@ export default function Dashboard() {
 
     const sync = async () => {
       let hospital = null;
-      if (settings?.notify_nearest_hospital && location?.latitude && location?.longitude) {
+      if (location?.latitude && location?.longitude) {
         hospital = await fetchNearestHospital(
           Number(location.latitude),
           Number(location.longitude)
@@ -83,7 +83,7 @@ export default function Dashboard() {
     };
 
     sync();
-  }, [contacts, location, settings, connected, syncAlertConfig, fetchNearestHospital]);
+  }, [contacts, location, connected, syncAlertConfig, fetchNearestHospital]);
 
   // Check authentication and consent status
   useEffect(() => {

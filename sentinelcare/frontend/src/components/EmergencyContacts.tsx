@@ -114,6 +114,9 @@ export default function EmergencyContacts() {
               <div>
                 <p className="text-sm font-medium text-slate-200">{contact.name}</p>
                 <p className="text-xs text-slate-500">{contact.relationship} &bull; {contact.phone}</p>
+                <p className={`text-xs ${contact.email ? 'text-slate-500' : 'text-amber-400/80'}`}>
+                  {contact.email || 'No email saved'}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-1">

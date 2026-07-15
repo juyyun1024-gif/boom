@@ -11,7 +11,6 @@ export default function AlertSettings() {
     loading: settingsLoading,
     toggleNotify911,
     toggleNotifyEmergencyContacts,
-    toggleNotifyNearestHospital,
   } = useUserSettings();
 
   const {
@@ -116,7 +115,7 @@ export default function AlertSettings() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-slate-200">Emergency Services (911)</p>
-                  <p className="text-xs text-slate-500">Automatically call 911</p>
+                  <p className="text-xs text-slate-500">Demo flag only. Does not call 911.</p>
                 </div>
               </div>
               <button
@@ -144,7 +143,7 @@ export default function AlertSettings() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-slate-200">Emergency Contacts</p>
-                  <p className="text-xs text-slate-500">Notify your listed contacts</p>
+                  <p className="text-xs text-slate-500">Automatically email listed contacts with saved email addresses</p>
                 </div>
               </div>
               <button
@@ -161,33 +160,16 @@ export default function AlertSettings() {
                 />
               </button>
             </div>
-
-            {/* Nearest Hospital Toggle */}
-            <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-200">Nearest Hospital</p>
-                  <p className="text-xs text-slate-500">Alert closest medical facility</p>
-                </div>
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/30">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+                <svg className="w-4 h-4 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
               </div>
-              <button
-                onClick={toggleNotifyNearestHospital}
-                disabled={loading}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
-                  settings?.notify_nearest_hospital ? 'bg-cyan-500' : 'bg-slate-600'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
-                    settings?.notify_nearest_hospital ? 'translate-x-5' : ''
-                  }`}
-                />
-              </button>
+              <div>
+                <p className="text-sm font-medium text-slate-200">Hospital Reference</p>
+                <p className="text-xs text-slate-500">Nearest hospital info is added to alert details only. The hospital is not contacted.</p>
+              </div>
             </div>
           </div>
 

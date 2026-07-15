@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("sentinelcare.email")
+last_email_error = ""
 
 # Load .env file from backend directory
 _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -60,11 +61,16 @@ def send_alert_email(
     Returns True if the email was sent successfully, False otherwise.
     Fails silently (logs error) so it never blocks the vision loop.
     """
+    global last_email_error
+    last_email_error = ""
+
     if not email_config.is_configured:
+        last_email_error = "SMTP_USER and SMTP_PASSWORD are not configured."
         logger.warning("SMTP not configured — skipping email alert. Set SMTP_USER and SMTP_PASSWORD env vars.")
         return False
 
     if not to_emails:
+        last_email_error = "No recipient emails provided."
         logger.info("No recipient emails provided — skipping email alert.")
         return False
 
@@ -93,8 +99,9 @@ def send_alert_email(
 
     if nearest_hospital:
         lines.append("")
-        lines.append("NEAREST HOSPITAL")
+        lines.append("NEAREST HOSPITAL REFERENCE")
         lines.append("=" * 40)
+        lines.append("SentinelCare did not contact this hospital. This is responder reference information only.")
         lines.append(f"Name:        {nearest_hospital.get('name', 'Unknown')}")
         lines.append(f"Address:     {nearest_hospital.get('address', 'Unknown')}")
         if nearest_hospital.get("phone"):
@@ -129,7 +136,10 @@ def send_alert_email(
         h_dist = nearest_hospital.get("distance", "")
         hospital_html = f"""
         <tr><td colspan="2" style="padding:12px 0 4px 0;font-weight:bold;color:#06b6d4;font-size:14px;">
-            🏥 Nearest Hospital
+            Nearest Hospital Reference
+        </td></tr>
+        <tr><td colspan="2" style="color:#facc15;padding:2px 0 6px 0;font-size:12px;">
+            SentinelCare did not contact this hospital. This is responder reference information only.
         </td></tr>
         <tr><td style="color:#94a3b8;padding:2px 12px 2px 0;">Name</td><td style="color:#f1f5f9;">{h_name}</td></tr>
         <tr><td style="color:#94a3b8;padding:2px 12px 2px 0;">Address</td><td style="color:#f1f5f9;">{h_addr}</td></tr>
@@ -182,5 +192,6 @@ def send_alert_email(
         return True
 
     except Exception as e:
+        last_email_error = str(e)
         logger.error(f"Failed to send alert email: {e}", exc_info=True)
         return False

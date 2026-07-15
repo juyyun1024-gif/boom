@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export interface UserLocation {
@@ -14,12 +14,27 @@ export interface UserLocation {
   country?: string;
 }
 
+const localLocationKey = (userId: string) => `sentinelcare_user_location_${userId}`;
+
+function loadLocalLocation(userId: string): UserLocation | null {
+  try {
+    const saved = window.localStorage.getItem(localLocationKey(userId));
+    return saved ? (JSON.parse(saved) as UserLocation) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalLocation(userId: string, location: UserLocation) {
+  window.localStorage.setItem(localLocationKey(userId), JSON.stringify(location));
+}
+
 export function useUserLocation() {
   const [location, setLocation] = useState<UserLocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [geolocating, setGeolocating] = useState(false);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   // Fetch location on mount
   useEffect(() => {
@@ -32,6 +47,8 @@ export function useUserLocation() {
           return;
         }
 
+        const fallbackLocation = loadLocalLocation(user.id);
+
         const { data, error: fetchError } = await supabase
           .from('user_location')
           .select('*')
@@ -39,10 +56,17 @@ export function useUserLocation() {
           .single();
 
         if (fetchError && fetchError.code !== 'PGRST116') {
-          throw fetchError;
+          console.warn('User location table unavailable, using local location:', fetchError);
+          setLocation(fallbackLocation);
+          setError(fetchError.message ?? 'Using local location');
+          return;
         }
 
-        setLocation(data || null);
+        const remoteLocation = data || fallbackLocation;
+        setLocation(remoteLocation);
+        if (remoteLocation) {
+          saveLocalLocation(user.id, remoteLocation);
+        }
       } catch (err) {
         console.error('Error fetching user location:', err);
         setError(err instanceof Error ? err.message : 'Failed to load location');
@@ -65,6 +89,9 @@ export function useUserLocation() {
         user_id: user.id,
       };
 
+      setLocation(newLocation);
+      saveLocalLocation(user.id, newLocation);
+
       // Use upsert to handle both insert and update
       const { data, error: upsertError } = await supabase
         .from('user_location')
@@ -72,9 +99,14 @@ export function useUserLocation() {
         .select()
         .single();
 
-      if (upsertError) throw upsertError;
+      if (upsertError) {
+        console.warn('Could not sync location to Supabase, keeping local location:', upsertError);
+        setError(upsertError.message ?? 'Using local location');
+        return newLocation;
+      }
       
       setLocation(data);
+      saveLocalLocation(user.id, data);
       return data;
     } catch (err) {
       console.error('Error saving location:', err);

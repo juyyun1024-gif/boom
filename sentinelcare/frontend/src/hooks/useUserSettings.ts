@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export interface UserSettings {
@@ -25,11 +25,35 @@ const defaultSettings: Omit<UserSettings, 'user_id'> = {
   notify_nearest_hospital: true,
 };
 
+const localSettingsKey = (userId: string) => `sentinelcare_user_settings_${userId}`;
+
+function settingsWithDefaults(userId: string, partial?: Partial<UserSettings> | null): UserSettings {
+  return {
+    ...defaultSettings,
+    ...partial,
+    user_id: userId,
+  };
+}
+
+function loadLocalSettings(userId: string): UserSettings | null {
+  try {
+    const saved = window.localStorage.getItem(localSettingsKey(userId));
+    if (!saved) return null;
+    return settingsWithDefaults(userId, JSON.parse(saved) as Partial<UserSettings>);
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalSettings(settings: UserSettings) {
+  window.localStorage.setItem(localSettingsKey(settings.user_id), JSON.stringify(settings));
+}
+
 export function useUserSettings() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   // Fetch user settings on mount
   useEffect(() => {
@@ -42,6 +66,8 @@ export function useUserSettings() {
           return;
         }
 
+        const fallbackSettings = loadLocalSettings(user.id) ?? settingsWithDefaults(user.id);
+
         // Try to get existing settings
         const { data, error: fetchError } = await supabase
           .from('user_settings')
@@ -50,18 +76,20 @@ export function useUserSettings() {
           .single();
 
         if (fetchError && fetchError.code !== 'PGRST116') {
-          // PGRST116 = no rows returned, which is fine for new users
-          throw fetchError;
+          console.warn('[v0] User settings table unavailable, using local settings:', fetchError);
+          setSettings(fallbackSettings);
+          saveLocalSettings(fallbackSettings);
+          setError(fetchError.message ?? 'Using local alert settings');
+          return;
         }
 
         if (data) {
-          setSettings(data);
+          const remoteSettings = settingsWithDefaults(user.id, data);
+          setSettings(remoteSettings);
+          saveLocalSettings(remoteSettings);
         } else {
           // Create default settings for new user
-          const newSettings: UserSettings = {
-            ...defaultSettings,
-            user_id: user.id,
-          };
+          const newSettings = fallbackSettings;
 
           const { data: insertedData, error: insertError } = await supabase
             .from('user_settings')
@@ -69,8 +97,17 @@ export function useUserSettings() {
             .select()
             .single();
 
-          if (insertError) throw insertError;
-          setSettings(insertedData);
+          if (insertError) {
+            console.warn('[v0] Could not persist default settings, using local settings:', insertError);
+            setSettings(newSettings);
+            saveLocalSettings(newSettings);
+            setError(insertError.message ?? 'Using local alert settings');
+            return;
+          }
+
+          const insertedSettings = settingsWithDefaults(user.id, insertedData);
+          setSettings(insertedSettings);
+          saveLocalSettings(insertedSettings);
         }
       } catch (err) {
         console.error('[v0] Error fetching user settings:', err);
@@ -91,7 +128,9 @@ export function useUserSettings() {
     if (!settings) return;
 
     // Optimistic update
-    setSettings(prev => prev ? { ...prev, [key]: value } : null);
+    const nextSettings = { ...settings, [key]: value };
+    setSettings(nextSettings);
+    saveLocalSettings(nextSettings);
 
     try {
       const { error: updateError } = await supabase
@@ -101,10 +140,8 @@ export function useUserSettings() {
 
       if (updateError) throw updateError;
     } catch (err) {
-      // Revert on error
-      console.error('[v0] Error updating setting:', err);
-      setSettings(prev => prev ? { ...prev, [key]: !value } : null);
-      setError(err instanceof Error ? err.message : 'Failed to update setting');
+      console.warn('[v0] Could not sync setting to Supabase, keeping local setting:', err);
+      setError(err instanceof Error ? err.message : 'Using local alert settings');
     }
   }, [settings, supabase]);
 
