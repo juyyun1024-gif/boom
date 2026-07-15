@@ -91,6 +91,7 @@ export function useAlertDispatch() {
     contacts: EmergencyContact[],
     location: UserLocation | null,
     nearestHospital: Hospital | null,
+    emailAlertsEnabled = true,
   ) => {
     try {
       const payload = {
@@ -112,6 +113,7 @@ export function useAlertDispatch() {
               distance: nearestHospital.distance,
             }
           : null,
+        email_alerts_enabled: emailAlertsEnabled,
       };
 
       await fetch(`${BACKEND_URL}/alerts/config`, {
@@ -161,6 +163,9 @@ export function useAlertDispatch() {
           : null,
         summary: alertInfo.healthReport?.responder_report || alertInfo.healthReport?.summary || '',
         recommended_action: alertInfo.healthReport?.recommended_actions?.slice(0, 2).join(' ') || '',
+        issues: alertInfo.healthReport?.observed_signals.map((signal) => ({ label: signal })) || [{
+          label: alertInfo.type,
+        }],
       }),
     });
 

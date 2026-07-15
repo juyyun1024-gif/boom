@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import os
 import smtplib
+from html import escape
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote_plus
 
 logger = logging.getLogger("sentinelcare.email")
 last_email_error = ""
@@ -55,6 +57,7 @@ def send_alert_email(
     nearest_hospital: Optional[dict] = None,
     summary: str = "",
     recommended_action: str = "",
+    issues: Optional[list[dict]] = None,
 ) -> bool:
     """Send a critical alert email to the given recipients.
 
@@ -97,6 +100,19 @@ def send_alert_email(
     if recommended_action:
         lines.append(f"Action:      {recommended_action}")
 
+    if issues:
+        lines.extend(["", "DETECTED ISSUES", "=" * 40])
+        for issue in issues:
+            label = issue.get("label") or issue.get("event_type") or "Unknown issue"
+            confidence = issue.get("confidence")
+            status = issue.get("status")
+            confidence_text = (
+                f" — {round(float(confidence) * 100)}% confidence"
+                if confidence is not None else ""
+            )
+            status_text = f" ({status})" if status else ""
+            lines.append(f"• {label}{status_text}{confidence_text}")
+
     if nearest_hospital:
         lines.append("")
         lines.append("NEAREST HOSPITAL REFERENCE")
@@ -111,7 +127,7 @@ def send_alert_email(
         if latitude is not None and longitude is not None and nearest_hospital.get("address"):
             directions = (
                 f"https://www.google.com/maps/dir/{latitude},{longitude}/"
-                f"{nearest_hospital['address'].replace(' ', '+')}"
+                f"{quote_plus(str(nearest_hospital['address']))}"
             )
             lines.append(f"Directions:  {directions}")
 
@@ -124,9 +140,34 @@ def send_alert_email(
 
     # ---- Build HTML body ----
     map_link = ""
+    map_image = ""
     if latitude is not None and longitude is not None:
         map_url = f"https://www.google.com/maps?q={latitude},{longitude}"
-        map_link = f'<a href="{map_url}" style="color:#06b6d4;">View on Google Maps</a>'
+        map_link = f'<a href="{escape(map_url, quote=True)}" style="color:#06b6d4;">View on Google Maps</a>'
+        maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
+        if maps_api_key:
+            static_map_url = (
+                "https://maps.googleapis.com/maps/api/staticmap?"
+                f"center={latitude},{longitude}&zoom=15&size=600x280&scale=2&maptype=roadmap&"
+                f"markers=color:red%7C{latitude},{longitude}&key={quote_plus(maps_api_key)}"
+            )
+            map_image = (
+                f'<a href="{escape(map_url, quote=True)}">'
+                f'<img src="{escape(static_map_url, quote=True)}" alt="Incident location map" '
+                'width="520" style="display:block;width:100%;max-width:520px;border-radius:8px;margin-top:12px;" />'
+                '</a>'
+            )
+
+    issue_html = ""
+    if issues:
+        issue_items = []
+        for issue in issues:
+            label = escape(str(issue.get("label") or issue.get("event_type") or "Unknown issue"))
+            status = escape(str(issue.get("status") or ""))
+            confidence = issue.get("confidence")
+            score = f"{round(float(confidence) * 100)}% confidence" if confidence is not None else "Confidence unavailable"
+            issue_items.append(f'<li style="margin:4px 0;color:#e2e8f0;">{label}{f" ({status})" if status else ""} — {score}</li>')
+        issue_html = '<tr><td colspan="2" style="padding:16px 0 4px;font-weight:bold;color:#06b6d4;font-size:14px;">Detected issues</td></tr><tr><td colspan="2"><ul style="margin:4px 0 0;padding-left:20px;">' + "".join(issue_items) + "</ul></td></tr>"
 
     hospital_html = ""
     if nearest_hospital:
@@ -160,8 +201,10 @@ def send_alert_email(
                 <tr><td style="color:#94a3b8;padding:4px 12px 4px 0;">Time</td><td style="color:#f1f5f9;">{timestamp}</td></tr>
                 {"<tr><td style='color:#94a3b8;padding:4px 12px 4px 0;'>Location</td><td style='color:#f1f5f9;'>" + location + "</td></tr>" if location else ""}
                 {"<tr><td style='color:#94a3b8;padding:4px 12px 4px 0;'>Map</td><td>" + map_link + "</td></tr>" if map_link else ""}
+                {issue_html}
                 {hospital_html}
             </table>
+            {map_image}
             {"<p style='margin:16px 0 0;padding:12px;background:#1e293b;border-radius:8px;color:#e2e8f0;font-size:13px;'>" + summary + "</p>" if summary else ""}
             {"<p style='margin:8px 0 0;padding:12px;background:#7f1d1d33;border:1px solid #ef444433;border-radius:8px;color:#fca5a5;font-size:13px;font-weight:600;'>" + recommended_action + "</p>" if recommended_action else ""}
         </div>

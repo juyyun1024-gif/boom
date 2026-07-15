@@ -42,6 +42,7 @@ _active_orchestrator: AgentOrchestrator | None = None
 _alert_contacts: list[dict] = []       # [{"name": ..., "email": ...}, ...]
 _alert_location: dict = {}             # {"address": ..., "latitude": ..., "longitude": ...}
 _alert_nearest_hospital: dict | None = None
+_email_alerts_enabled = True
 _sent_email_alert_ids: set[str] = set()
 
 
@@ -208,6 +209,7 @@ class AlertContactsPayload(PydanticBaseModel):
     contacts: list[dict] = []          # [{"name": "...", "email": "...", "phone": "..."}]
     location: dict = {}                # {"address": "...", "latitude": ..., "longitude": ...}
     nearest_hospital: dict | None = None  # {"name": "...", "address": "...", "phone": "...", "distance": ...}
+    email_alerts_enabled: bool = True
 
 
 class AlertEmailPayload(PydanticBaseModel):
@@ -220,15 +222,17 @@ class AlertEmailPayload(PydanticBaseModel):
     nearest_hospital: dict | None = None
     summary: str = ""
     recommended_action: str = ""
+    issues: list[dict] = []
 
 
 @app.post("/alerts/config")
 async def set_alert_config(payload: AlertContactsPayload):
     """Store emergency contacts and location so the backend can send emails on alert."""
-    global _alert_contacts, _alert_location, _alert_nearest_hospital
+    global _alert_contacts, _alert_location, _alert_nearest_hospital, _email_alerts_enabled
     _alert_contacts = payload.contacts
     _alert_location = payload.location
     _alert_nearest_hospital = payload.nearest_hospital
+    _email_alerts_enabled = payload.email_alerts_enabled
     logger.info(
         f"Alert config updated: {len(_alert_contacts)} contacts, "
         f"location={'set' if _alert_location.get('address') else 'unset'}, "
@@ -248,6 +252,7 @@ def _send_alert_email_payload(
     nearest_hospital: dict | None,
     summary: str,
     recommended_action: str,
+    issues: list[dict] | None = None,
 ) -> dict:
     """Send alert email using backend SMTP, with alert-id deduplication."""
     emails = [c["email"] for c in contacts if c.get("email")]
@@ -293,6 +298,7 @@ def _send_alert_email_payload(
         nearest_hospital=nearest_hospital,
         summary=summary,
         recommended_action=recommended_action,
+        issues=issues,
     )
 
     if sent and alert_id:
@@ -311,7 +317,7 @@ def _send_alert_email_payload(
     }
 
 
-def _send_alert_email_for_alert(alert) -> dict:
+def _send_alert_email_for_alert(alert, agent_states: list | None = None) -> dict:
     """Send alert email using stored contacts/location. Called from vision loop."""
     event = alert.event
 
@@ -323,6 +329,20 @@ def _send_alert_email_for_alert(alert) -> dict:
         else event.recommended_action
     )
 
+    issues = [{
+        "label": event.event_type.replace("_", " ").title(),
+        "status": event.status.replace("_", " "),
+        "confidence": event.confidence,
+    }]
+    for state in agent_states or []:
+        state_name = state.state.value if hasattr(state.state, "value") else str(state.state)
+        if state.available is not False and state.confidence > 0 and state.agent_name != event.agent:
+            issues.append({
+                "label": state.event_type.replace("_", " ").title(),
+                "status": state_name.replace("_", " "),
+                "confidence": state.confidence,
+            })
+
     return _send_alert_email_payload(
         alert_id=alert.alert_id,
         contacts=_alert_contacts,
@@ -333,6 +353,7 @@ def _send_alert_email_for_alert(alert) -> dict:
         nearest_hospital=_alert_nearest_hospital,
         summary=summary,
         recommended_action=recommended_action,
+        issues=issues,
     )
 
 
@@ -353,6 +374,7 @@ async def dispatch_alert_email(payload: AlertEmailPayload):
         nearest_hospital=payload.nearest_hospital,
         summary=payload.summary,
         recommended_action=payload.recommended_action,
+        issues=payload.issues,
     )
     return result
 
@@ -613,8 +635,8 @@ async def _vision_loop(ws: WebSocket) -> None:
                     msg.alert = latest
                     msg.health_report = latest.health_report or latest.event.health_report
                     msg.type = "critical_alert"
-                    # Email dispatch is triggered by the frontend countdown via
-                    # /alerts/dispatch-email, so Cancel Alert can still stop it.
+                    # The dashboard countdown dispatches email only after its
+                    # false-positive cancellation window expires.
 
             for alert_id, task in list(_llm_report_tasks.items()):
                 if task.done():

@@ -79,11 +79,16 @@ export default function Dashboard() {
           Number(location.longitude)
         );
       }
-      await syncAlertConfig(contacts, location, hospital);
+      await syncAlertConfig(
+        contacts,
+        location,
+        hospital,
+        settings?.notify_emergency_contacts ?? true,
+      );
     };
 
     sync();
-  }, [contacts, location, connected, syncAlertConfig, fetchNearestHospital]);
+  }, [contacts, location, connected, settings, syncAlertConfig, fetchNearestHospital]);
 
   // Check authentication and consent status
   useEffect(() => {

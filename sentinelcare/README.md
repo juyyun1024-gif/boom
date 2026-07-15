@@ -109,6 +109,23 @@ npm run dev
 
 Open **http://localhost:3000** in your browser.
 
+### Emergency email and Maps setup
+
+Create `backend/.env` before starting the API:
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=alerts@example.com
+SMTP_PASSWORD=your-provider-app-password
+SMTP_FROM=alerts@example.com
+SMTP_FROM_NAME=SentinelCare Alert System
+GOOGLE_MAPS_API_KEY=your-google-maps-platform-key
+```
+
+Enable the **Places API (New)** and **Maps Static API** for that Google Maps key.
+When a critical alert is raised, the backend sends one email to every saved emergency-contact email address. The message includes the detected issues and confidence scores, timestamp, incident address and Google Maps link, a pin map image, and the closest hospital returned by Google Places. Run `scripts/003_create_alert_tables.sql` after the existing security migrations to persist contacts, locations, and alert history in Supabase.
+
 ---
 
 ## 🧪 Demo Scenarios

@@ -11,6 +11,20 @@ interface Hospital {
   openNow?: boolean;
 }
 
+interface GooglePlace {
+  displayName?: { text?: string };
+  formattedAddress?: string;
+  nationalPhoneNumber?: string;
+  location: { latitude: number; longitude: number };
+  rating?: number;
+  currentOpeningHours?: { openNow?: boolean };
+}
+
+interface NearbySearchResponse {
+  places?: GooglePlace[];
+  error?: { message?: string };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { latitude, longitude } = await request.json();
@@ -32,34 +46,50 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Use Google Places API to find nearby hospitals
-    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=10000&type=hospital&key=${apiKey}`;
+    // Places API (New) ranks hospitals by distance from the incident point.
+    const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.rating,places.currentOpeningHours',
+      },
+      body: JSON.stringify({
+        includedTypes: ['hospital'],
+        maxResultCount: 5,
+        rankPreference: 'DISTANCE',
+        locationRestriction: {
+          circle: {
+            center: { latitude, longitude },
+            radius: 10000,
+          },
+        },
+      }),
+    });
+    const data = await response.json() as NearbySearchResponse;
 
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      console.error('Google Places API error:', data.status);
+    if (!response.ok) {
+      console.error('Google Places API error:', data.error?.message || response.status);
       return NextResponse.json({
         hospitals: getMockHospitals(latitude, longitude),
         isMockData: true,
       });
     }
 
-    const hospitals: Hospital[] = (data.results || []).slice(0, 5).map((place: any) => ({
-      name: place.name,
-      address: place.vicinity,
-      phone: place.formatted_phone_number,
+    const hospitals: Hospital[] = (data.places || []).map((place) => ({
+      name: place.displayName?.text || 'Unnamed hospital',
+      address: place.formattedAddress || '',
+      phone: place.nationalPhoneNumber,
       distance: calculateDistance(
         latitude,
         longitude,
-        place.geometry.location.lat,
-        place.geometry.location.lng
+        place.location.latitude,
+        place.location.longitude
       ),
-      latitude: place.geometry.location.lat,
-      longitude: place.geometry.location.lng,
+      latitude: place.location.latitude,
+      longitude: place.location.longitude,
       rating: place.rating,
-      openNow: place.opening_hours?.open_now,
+      openNow: place.currentOpeningHours?.openNow,
     }));
 
     // Sort by distance
