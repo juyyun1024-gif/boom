@@ -16,6 +16,7 @@ export default function AlertSettings() {
   const {
     location,
     loading: locationLoading,
+    error: locationError,
     geolocating,
     saveLocation,
     getCurrentLocation,
@@ -34,6 +35,7 @@ export default function AlertSettings() {
     try {
       // Geocode the address to get coordinates for hospital lookup
       const coords = await geocodeAddress(addressInput);
+      if (!coords) return;
       await saveLocation({
         home_address: addressInput,
         latitude: coords?.lat ?? null,
@@ -254,6 +256,9 @@ export default function AlertSettings() {
                   </svg>
                   {geolocating ? 'Getting location...' : 'Use current location'}
                 </button>
+                {locationError && (
+                  <p className="text-xs text-amber-400">{locationError}</p>
+                )}
               </div>
             )}
           </div>

@@ -174,6 +174,7 @@ export function useUserLocation() {
       return data.location || null;
     } catch (err) {
       console.error('Geocoding error:', err);
+      setError('Could not verify that address with Google Maps. Your saved location was not changed.');
       return null;
     }
   }, []);

@@ -14,15 +14,9 @@ export async function POST(request: NextRequest) {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
     if (!apiKey) {
-      // Return mock data for hackathon demo
       return NextResponse.json({
-        location: {
-          lat: 37.7749,
-          lng: -122.4194,
-        },
-        formattedAddress: address,
-        isMockData: true,
-      });
+        error: 'Google Maps is not configured. Entering an address cannot produce a verified incident location.',
+      }, { status: 503 });
     }
 
     // Use Google Geocoding API
