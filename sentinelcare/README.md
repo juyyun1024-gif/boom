@@ -2,7 +2,7 @@
 
 SentinelCare is a consent-based, camera-assisted home-safety prototype. It analyzes a live camera feed for observable signs of a fall or other concerning movement, gives the monitored person a recovery and cancellation window, and then notifies configured emergency contacts by email when a critical alert is confirmed.
 
-> SentinelCare is not a medical device, does not diagnose medical conditions, and does not contact 911 or hospitals. Treat every alert as responder-support information and follow local emergency procedures.
+> SentinelCare is not a medical device, does not diagnose medical conditions, and does not contact 911 or hospitals as defalut setting. Treat every alert as responder-support information and follow local emergency procedures.
 
 ## What it does
 
