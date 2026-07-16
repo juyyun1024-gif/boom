@@ -329,19 +329,13 @@ def _send_alert_email_for_alert(alert, agent_states: list | None = None) -> dict
         else event.recommended_action
     )
 
-    issues = [{
-        "label": event.event_type.replace("_", " ").title(),
-        "status": event.status.replace("_", " "),
-        "confidence": event.confidence,
-    }]
-    for state in agent_states or []:
-        state_name = state.state.value if hasattr(state.state, "value") else str(state.state)
-        if state.available is not False and state.confidence > 0 and state.agent_name != event.agent:
-            issues.append({
-                "label": state.event_type.replace("_", " ").title(),
-                "status": state_name.replace("_", " "),
-                "confidence": state.confidence,
-            })
+    combined_score = max(0.0, min(1.0, event.confidence))
+
+    issues = [
+        {"label": f"Combined alert score: {round(combined_score * 100)}%"},
+        {"label": f"Primary trigger: {event.event_type.replace('_', ' ')}"},
+        {"label": f"Recovery status: no confirmed recovery within {event.recovery_window_seconds:.0f} seconds"},
+    ]
 
     return _send_alert_email_payload(
         alert_id=alert.alert_id,

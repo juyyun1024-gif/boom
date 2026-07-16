@@ -110,6 +110,8 @@ class HealthReportAgent:
             or "Location unavailable"
         )
 
+        combined_alert_score = max(0.0, min(1.0, event.confidence))
+
         active_signals: list[str] = []
         for state in agent_states:
             if state.available is False:
@@ -117,17 +119,14 @@ class HealthReportAgent:
             state_name = state.state.value if hasattr(state.state, "value") else str(state.state)
             if state.confidence > 0 or state_name in {"critical_alert", "monitoring_recovery"}:
                 active_signals.append(
-                    f"{state.agent_name}: {state_name.replace('_', ' ')}, "
-                    f"confidence {round(state.confidence * 100)}%, event {state.event_type.replace('_', ' ')}"
+                    f"{state.agent_name}: {state_name.replace('_', ' ')}, event {state.event_type.replace('_', ' ')}"
                 )
 
         observed_signals = [
-            f"Primary trigger: {event.event_type.replace('_', ' ')} from {event.agent}",
-            f"Alert confidence: {round(event.confidence * 100)}%",
+            f"Combined alert score: {round(combined_alert_score * 100)}%",
+            f"Primary trigger: {event.event_type.replace('_', ' ')}",
+            f"Recovery status: no confirmed recovery within {event.recovery_window_seconds:.0f} seconds",
             f"Pose quality: {round(features.pose_quality * 100)}% ({features.visibility_reason})",
-            f"Velocity score: {features.velocity:.3f}",
-            f"Ground proximity score: {features.ground_proximity:.3f}",
-            f"Torso angle: {features.torso_angle:.1f} degrees",
         ]
         observed_signals.extend(active_signals[:4])
 
@@ -158,7 +157,7 @@ class HealthReportAgent:
             "agent": event.agent,
             "event_type": event.event_type,
             "status": event.status,
-            "confidence": round(event.confidence, 3),
+            "confidence": round(combined_alert_score, 3),
             "event_timestamp": event.timestamp,
             "triggered_at": alert.triggered_at,
             "recovery_window_seconds": event.recovery_window_seconds,
@@ -179,13 +178,13 @@ class HealthReportAgent:
 
     def _summary_from_evidence(self, evidence: dict[str, Any]) -> str:
         event_type = str(evidence["event_type"]).replace("_", " ")
-        confidence = round(float(evidence["confidence"]) * 100)
+        combined_score = round(float(evidence["confidence"]) * 100)
         location = evidence["location_label"]
-        return f"Critical health event detected: {event_type} at {location} with {confidence}% confidence."
+        return f"Critical health event detected: {event_type} at {location} with {combined_score}% combined alert score."
 
     def _structured_report_text(self, evidence: dict[str, Any]) -> str:
         event_type = str(evidence["event_type"]).replace("_", " ")
-        confidence = round(float(evidence["confidence"]) * 100)
+        combined_score = round(float(evidence["confidence"]) * 100)
         location = evidence["location_label"]
         hospital = evidence.get("nearest_hospital") or {}
         hospital_text = ""
@@ -194,7 +193,7 @@ class HealthReportAgent:
 
         return (
             f"SentinelCare detected a critical health event classified as {event_type} "
-            f"with {confidence}% confidence. Location payload: {location}."
+            f"with a {combined_score}% combined alert score. Location payload: {location}."
             f"{hospital_text} The system observed body-motion evidence and recovery-window failure, "
             "but it cannot diagnose the medical cause. A responder should verify responsiveness, "
             "check breathing and injuries if trained, and use local emergency protocol."
@@ -203,7 +202,7 @@ class HealthReportAgent:
     def _call_ollama(self, evidence: dict[str, Any]) -> str:
         compact_evidence = {
             "trigger": str(evidence["event_type"]).replace("_", " "),
-            "confidence_percent": round(float(evidence["confidence"]) * 100),
+            "combined_alert_score_percent": round(float(evidence["confidence"]) * 100),
             "location": evidence["location_label"],
             "nearest_hospital": evidence["nearest_hospital"],
             "signals": evidence["observed_signals"][:5],
@@ -211,8 +210,9 @@ class HealthReportAgent:
         }
         prompt = (
             "Write a concise responder report in exactly 3 sentences. "
-            "Do not diagnose or invent details. Include trigger, confidence, location, "
-            "and uncertainty. Evidence JSON: "
+            "Do not diagnose or invent details. Include trigger, combined alert score, "
+            "location, and uncertainty. Do not mention model confidence or rule confidence. "
+            "Evidence JSON: "
             f"{json.dumps(compact_evidence, sort_keys=True)}"
         )
 

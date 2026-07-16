@@ -101,7 +101,7 @@ def send_alert_email(
         lines.append(f"Action:      {recommended_action}")
 
     if issues:
-        lines.extend(["", "DETECTED ISSUES", "=" * 40])
+        lines.extend(["", "DETECTION EVIDENCE", "=" * 40])
         for issue in issues:
             label = issue.get("label") or issue.get("event_type") or "Unknown issue"
             confidence = issue.get("confidence")
@@ -165,9 +165,12 @@ def send_alert_email(
             label = escape(str(issue.get("label") or issue.get("event_type") or "Unknown issue"))
             status = escape(str(issue.get("status") or ""))
             confidence = issue.get("confidence")
-            score = f"{round(float(confidence) * 100)}% confidence" if confidence is not None else "Confidence unavailable"
-            issue_items.append(f'<li style="margin:4px 0;color:#e2e8f0;">{label}{f" ({status})" if status else ""} — {score}</li>')
-        issue_html = '<tr><td colspan="2" style="padding:16px 0 4px;font-weight:bold;color:#06b6d4;font-size:14px;">Detected issues</td></tr><tr><td colspan="2"><ul style="margin:4px 0 0;padding-left:20px;">' + "".join(issue_items) + "</ul></td></tr>"
+            confidence_text = f" — {round(float(confidence) * 100)}% confidence" if confidence is not None else ""
+            status_text = f" ({status})" if status else ""
+            issue_items.append(
+                f'<li style="margin:4px 0;color:#e2e8f0;">{label}{status_text}{confidence_text}</li>'
+            )
+        issue_html = '<tr><td colspan="2" style="padding:16px 0 4px;font-weight:bold;color:#06b6d4;font-size:14px;">Detection evidence</td></tr><tr><td colspan="2"><ul style="margin:4px 0 0;padding-left:20px;">' + "".join(issue_items) + "</ul></td></tr>"
 
     hospital_html = ""
     if nearest_hospital:

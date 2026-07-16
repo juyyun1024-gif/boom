@@ -73,6 +73,8 @@ class ResponseGuardAgent(BaseAgent):
         self._ai_fall_model: AIFallRiskModel | None = None
         self._last_ai_prediction: AIFallPrediction | None = None
         self._last_rule_confidence = 0.0
+        self._event_peak_detector_confidence = 0.0
+        self._event_peak_evidence_confidence = 0.0
         if use_trained_model:
             self._ai_fall_model = AIFallRiskModel(trained_model_path)
             print(f"[FallGuard] AI model status: {self._ai_fall_model.status}")
@@ -123,8 +125,10 @@ class ResponseGuardAgent(BaseAgent):
                 print(f"[DEBUG] High confidence frame {self._high_confidence_frames}/{self._required_sustained_frames} (conf={fall_confidence:.3f})")
                 if self._high_confidence_frames >= self._required_sustained_frames:
                     print(f"[ALERT] TRIGGERING SUSPICIOUS EVENT! Sustained {self._high_confidence_frames} frames")
-                    self._transition(AgentStateName.SUSPICIOUS_EVENT, fall_confidence, now)
-                    print(f"[STATE] Transitioned to SUSPICIOUS_EVENT with confidence {fall_confidence:.3f}")
+                    self._reset_event_confidence_peaks()
+                    combined_alert_score = self._update_combined_alert_score(fall_confidence)
+                    self._transition(AgentStateName.SUSPICIOUS_EVENT, combined_alert_score, now)
+                    print(f"[STATE] Transitioned to SUSPICIOUS_EVENT with combined score {combined_alert_score:.3f}")
                     self._event_start = now
                     self._frames_since_suspicious = 0
             else:
@@ -135,7 +139,8 @@ class ResponseGuardAgent(BaseAgent):
 
         elif self._state == AgentStateName.SUSPICIOUS_EVENT:
             self._frames_since_suspicious += 1
-            self._confidence = max(self._confidence, fall_confidence)
+            combined_alert_score = self._update_combined_alert_score(fall_confidence)
+            self._confidence = max(self._confidence, combined_alert_score)
             # Confirm immediately - we already required 2 sustained frames to get here
             if self._frames_since_suspicious >= 1 and self._confidence >= self._confidence_threshold:
                 self._transition(AgentStateName.MONITORING_RECOVERY, self._confidence, now)
@@ -150,6 +155,8 @@ class ResponseGuardAgent(BaseAgent):
                 self._transition(AgentStateName.NORMAL, 0.0, now)
 
         elif self._state == AgentStateName.MONITORING_RECOVERY:
+            combined_alert_score = self._update_combined_alert_score(fall_confidence)
+            self._confidence = max(self._confidence, combined_alert_score)
             elapsed = self._monitoring_elapsed(now)
             recovery_score = self._compute_recovery_score(features)
 
@@ -200,6 +207,7 @@ class ResponseGuardAgent(BaseAgent):
         self._high_confidence_frames = 0
         self._last_ai_prediction = None
         self._last_rule_confidence = 0.0
+        self._reset_event_confidence_peaks()
         self._last_pose_quality = 0.0
         self._last_pose_reliable = False
         self._last_visibility_reason = "no_pose"
@@ -248,6 +256,32 @@ class ResponseGuardAgent(BaseAgent):
             final_confidence = self._ml_booster.boost_confidence("FallGuard", rule_confidence, f)
 
         return final_confidence
+
+    def _reset_event_confidence_peaks(self) -> None:
+        self._event_peak_detector_confidence = 0.0
+        self._event_peak_evidence_confidence = 0.0
+
+    def _update_combined_alert_score(self, fall_confidence: float) -> float:
+        """Store the peak event score so reports do not use stale later frames."""
+        detector_confidence = fall_confidence
+
+        evidence_confidence = self._last_rule_confidence
+        if evidence_confidence <= 0:
+            evidence_confidence = detector_confidence
+
+        self._event_peak_detector_confidence = max(
+            self._event_peak_detector_confidence,
+            detector_confidence,
+        )
+        self._event_peak_evidence_confidence = max(
+            self._event_peak_evidence_confidence,
+            evidence_confidence,
+        )
+
+        combined = (
+            self._event_peak_detector_confidence + self._event_peak_evidence_confidence
+        ) / 2
+        return max(0.0, min(1.0, combined))
 
     def _compute_rule_fall_confidence(self, f: PoseFeatures) -> float:
         """Multi-signal rule fallback for fall/collapse confidence."""
@@ -395,6 +429,8 @@ class ResponseGuardAgent(BaseAgent):
         if new_state in {AgentStateName.NORMAL, AgentStateName.RECOVERED, AgentStateName.CRITICAL_ALERT}:
             self._timer_pause_started = None
             self._timer_paused_total = 0.0
+        if new_state == AgentStateName.NORMAL:
+            self._reset_event_confidence_peaks()
 
     def _mark_pose_unreliable(self, reason: str, quality: float, now: float) -> None:
         """Block alert starts from frames where FallGuard cannot trust the pose."""
